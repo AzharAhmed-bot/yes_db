@@ -33,10 +33,8 @@
 
 ---
 
-## Purpose
-
-yes_db serves as an educational project to:
-
-- Demonstrate the structure and function of a relational database
-- Teach concepts like B-Trees, page-based storage, and virtual machines
-- Provide a Python-first implementation for experimentation and learning
+## How to run the database in your CLI
+- **No external packages needed for python**
+``` bash
+python3 -m chidb.cli.shell test.cdb
+```
