@@ -1,25 +1,9 @@
 # yes_db (chidb-python)
 
-**yes_db** is a Python-based educational relational database system inspired by `chidb`. It is designed to teach the internal workings of relational databases and can be embedded into Python applications.
+**yes_db** is a Python-based relational database system inspired by `chidb` that is currently under development. It is designed for the future! All Contributions are welcome !!
 
 ---
 
-## Features
-
-- Single-file storage (`.cdb`) using fixed-size pages
-- Table and index B-Trees for efficient data storage and lookup
-- Database Virtual Machine (DBM) executing low-level instructions generated from SQL
-- Supports basic SQL statements: `CREATE TABLE`, `CREATE INDEX`, `INSERT`, `SELECT`
-- Layered architecture separating concerns:
-  - Pager: manages file I/O and pages
-  - Record: handles serialization/deserialization of table rows
-  - B-Tree: implements table and index structures with search, insert, split, and iteration
-  - DBM: executes database instructions
-  - SQL Layer: lexer, parser, optimizer, code generator
-  - API: exposes database functionality to Python programs
-  - CLI Shell: allows interactive SQL queries
-
----
 
 ## Architecture Overview
 
