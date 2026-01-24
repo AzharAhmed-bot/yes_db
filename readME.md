@@ -1,4 +1,4 @@
-# yes_db (chidb-python)
+# yes_db 
 
 **yes_db** is a Python-based relational database system inspired by `chidb` that is currently under development. It is designed for the future! All Contributions are welcome !!
 
