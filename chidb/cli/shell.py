@@ -59,9 +59,10 @@ class Shell:
     
     def print_welcome(self) -> None:
         """Print welcome message."""
-        print("yes_db - Educational Relational Database")
-        print("Enter SQL statements or .help for commands")
-        print()
+        print("yes_db 🚀, The database for the future")
+        print("Relational database engine written entirely in Python, I'm still working on it!")
+        print("Enjoy your stay!")
+
     
     def execute_sql(self, sql: str) -> None:
         """
