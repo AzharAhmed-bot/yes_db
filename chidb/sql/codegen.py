@@ -25,6 +25,7 @@ class CodeGenerator:
             table_registry: Mapping of table names to root page IDs
         """
         self.table_registry = table_registry or {}
+        self.table_metadata = {}  # Will be set by API
         self.logger = get_logger("codegen")
         self.next_auto_key = 1  # For auto-incrementing keys
     
@@ -94,8 +95,7 @@ class CodeGenerator:
         # Start of loop
         loop_start = len(instructions)
         
-        # Get key and data
-        instructions.append(Instruction(Opcode.KEY, p1=cursor_id))
+        # Get data (we don't need the key for output)
         instructions.append(Instruction(Opcode.DATA, p1=cursor_id))
         
         # Apply WHERE clause if present
@@ -107,10 +107,8 @@ class CodeGenerator:
             skip_row_jump = len(instructions) + 1 + 1  # After JUMP_IF_FALSE and column extraction
             # We'll adjust this after we know the full instruction count
         
-        # For now, just output the record as-is
-        # In a full implementation, we'd extract specific columns
-        # For simplicity: output key and record
-        num_output_columns = 2  # key and record
+        # Output only the record data (not the key)
+        num_output_columns = 1  # just the record
         instructions.append(Instruction(Opcode.RESULT_ROW, p1=num_output_columns))
         
         # Next record, jump back to loop start if more records
@@ -135,7 +133,7 @@ class CodeGenerator:
         Generated code pattern:
         1. OPEN_WRITE cursor, root_page
         2. INTEGER key
-        3. Push all values onto stack
+        3. Push all values onto stack (auto-fill PRIMARY KEY if needed)
         4. MAKE_RECORD num_fields
         5. INSERT cursor
         6. CLOSE cursor
@@ -150,9 +148,39 @@ class CodeGenerator:
         # Open cursor for writing
         instructions.append(Instruction(Opcode.OPEN_WRITE, p1=cursor_id, p2=root_page))
         
-        # Push key (use auto-increment)
-        key = self.next_auto_key
-        self.next_auto_key += 1
+        # Check if table has metadata and a primary key
+        table_meta = self.table_metadata.get(stmt.table) if self.table_metadata else None
+        
+        # Determine the key to use
+        if table_meta and table_meta.primary_key_column:
+            # Find the primary key column index
+            pk_index = None
+            for i, col in enumerate(table_meta.columns):
+                if col.name == table_meta.primary_key_column:
+                    pk_index = i
+                    break
+            
+            # Check if user provided value for PK
+            if pk_index is not None and pk_index < len(stmt.values) and stmt.values[pk_index] is not None:
+                # User provided PK value
+                key = stmt.values[pk_index]
+            else:
+                # Auto-generate PK value
+                key = table_meta.next_auto_increment
+                table_meta.next_auto_increment += 1
+                
+                # Insert the auto-generated value into the correct position
+                # For now, assume PK is first column if not specified
+                if pk_index == 0:
+                    stmt.values = [key] + stmt.values[1:] if len(stmt.values) > 1 else [key]
+                elif pk_index is not None and pk_index < len(stmt.values):
+                    stmt.values[pk_index] = key
+        else:
+            # No primary key, use auto-increment key
+            key = self.next_auto_key
+            self.next_auto_key += 1
+        
+        # Push key
         instructions.append(Instruction(Opcode.INTEGER, p1=key))
         
         # Push values onto stack

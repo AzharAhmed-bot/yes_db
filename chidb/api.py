@@ -4,14 +4,25 @@ Provides high-level interface for applications to interact with the database.
 """
 
 from typing import List, Any, Optional, Dict
+from dataclasses import dataclass
 from chidb.pager import Pager
 from chidb.btree import BTree
 from chidb.dbm import DatabaseMachine
 from chidb.sql.lexer import Lexer
-from chidb.sql.parser import Parser, CreateTableStatement
+from chidb.sql.parser import Parser, CreateTableStatement, ColumnDef
 from chidb.sql.optimizer import Optimizer
 from chidb.sql.codegen import CodeGenerator
 from chidb.log import get_logger
+
+
+@dataclass
+class TableMetadata:
+    """Metadata about a table."""
+    name: str
+    root_page: int
+    columns: List[ColumnDef]
+    primary_key_column: Optional[str] = None
+    next_auto_increment: int = 1
 
 
 class YesDB:
@@ -44,7 +55,10 @@ class YesDB:
         self.optimizer = Optimizer()
         self.logger = get_logger("api")
         
-        # Table registry: maps table name -> root page ID
+        # Table metadata: maps table name -> TableMetadata
+        self.table_metadata: Dict[str, TableMetadata] = {}
+        
+        # Legacy tables dict for backward compatibility
         self.tables: Dict[str, int] = {}
         
         # Initialize system (load existing tables if any)
@@ -84,6 +98,7 @@ class YesDB:
             
             # Code generation
             self.codegen.table_registry = self.tables
+            self.codegen.table_metadata = self.table_metadata
             instructions = self.codegen.generate(ast)
             
             # Execution
@@ -110,10 +125,27 @@ class YesDB:
         btree = BTree(self.pager)
         root_page = btree.get_root_page()
         
+        # Find primary key column
+        primary_key_column = None
+        for col in stmt.columns:
+            if col.primary_key:
+                primary_key_column = col.name
+                break
+        
+        # Create table metadata
+        metadata = TableMetadata(
+            name=table_name,
+            root_page=root_page,
+            columns=stmt.columns,
+            primary_key_column=primary_key_column,
+            next_auto_increment=1
+        )
+        
         # Register the table
+        self.table_metadata[table_name] = metadata
         self.tables[table_name] = root_page
         
-        self.logger.info(f"Created table '{table_name}' with root page {root_page}")
+        self.logger.info(f"Created table '{table_name}' with root page {root_page}, PK: {primary_key_column}")
         
         return []  # CREATE TABLE returns no rows
     
