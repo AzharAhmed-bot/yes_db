@@ -8,8 +8,9 @@ from dataclasses import dataclass
 from chidb.pager import Pager
 from chidb.btree import BTree
 from chidb.dbm import DatabaseMachine
+from chidb.record import Record
 from chidb.sql.lexer import Lexer
-from chidb.sql.parser import Parser, CreateTableStatement, ColumnDef
+from chidb.sql.parser import Parser, CreateTableStatement, UpdateStatement, DeleteStatement, ColumnDef
 from chidb.sql.optimizer import Optimizer
 from chidb.sql.codegen import CodeGenerator
 from chidb.log import get_logger
@@ -93,6 +94,14 @@ class YesDB:
             if isinstance(ast, CreateTableStatement):
                 return self._execute_create_table(ast)
             
+            # Handle UPDATE specially (direct B-tree operation)
+            if isinstance(ast, UpdateStatement):
+                return self._execute_update(ast)
+            
+            # Handle DELETE specially (direct B-tree operation)
+            if isinstance(ast, DeleteStatement):
+                return self._execute_delete(ast)
+            
             # Optimization
             ast = self.optimizer.optimize(ast)
             
@@ -148,6 +157,142 @@ class YesDB:
         self.logger.info(f"Created table '{table_name}' with root page {root_page}, PK: {primary_key_column}")
         
         return []  # CREATE TABLE returns no rows
+    
+    def _execute_update(self, stmt: UpdateStatement) -> List[List[Any]]:
+        """
+        Execute UPDATE statement.
+        
+        Updates records in the table.
+        """
+        from chidb.record import Record
+        
+        table_name = stmt.table
+        if table_name not in self.tables:
+            raise ValueError(f"Table '{table_name}' does not exist")
+        
+        root_page = self.tables[table_name]
+        table_meta = self.table_metadata.get(table_name)
+        
+        # Get the B-tree
+        btree = BTree(self.pager, root_page)
+        
+        # Scan all records
+        all_records = btree.scan()
+        
+        updated_count = 0
+        for key, record in all_records:
+            # Check if this record matches WHERE clause (if any)
+            # For now, update all records if no WHERE clause
+            should_update = True
+            
+            if stmt.where:
+                # Simple WHERE evaluation (only supports column = value)
+                should_update = self._evaluate_where(record, stmt.where, table_meta)
+            
+            if should_update:
+                # Get current values
+                values = list(record.get_values())
+                
+                # Apply updates
+                for col_name, new_value in stmt.assignments:
+                    # Find column index
+                    for i, col_def in enumerate(table_meta.columns):
+                        if col_def.name == col_name:
+                            values[i] = new_value
+                            break
+                
+                # Update the record
+                new_record = Record(values)
+                btree.update(key, new_record)
+                updated_count += 1
+        
+        self.logger.info(f"Updated {updated_count} rows in '{table_name}'")
+        return []
+    
+    def _execute_delete(self, stmt: DeleteStatement) -> List[List[Any]]:
+        """
+        Execute DELETE statement.
+        
+        Deletes records from the table.
+        """
+        table_name = stmt.table
+        if table_name not in self.tables:
+            raise ValueError(f"Table '{table_name}' does not exist")
+        
+        root_page = self.tables[table_name]
+        table_meta = self.table_metadata.get(table_name)
+        
+        # Get the B-tree
+        btree = BTree(self.pager, root_page)
+        
+        # Scan all records to find ones to delete
+        all_records = btree.scan()
+        keys_to_delete = []
+        
+        for key, record in all_records:
+            # Check if this record matches WHERE clause
+            should_delete = True
+            
+            if stmt.where:
+                should_delete = self._evaluate_where(record, stmt.where, table_meta)
+            
+            if should_delete:
+                keys_to_delete.append(key)
+        
+        # Delete the keys
+        for key in keys_to_delete:
+            btree.delete(key)
+        
+        self.logger.info(f"Deleted {len(keys_to_delete)} rows from '{table_name}'")
+        return []
+    
+    def _evaluate_where(self, record: 'Record', where_expr, table_meta) -> bool:
+        """
+        Evaluate WHERE clause for a record.
+        
+        Simplified implementation - only supports: column = value
+        """
+        from chidb.sql.parser import BinaryOp, Literal, Identifier
+        
+        if isinstance(where_expr, BinaryOp):
+            # Get left side (should be column name)
+            if isinstance(where_expr.left, Identifier):
+                col_name = where_expr.left.name
+                
+                # Find column index
+                col_index = None
+                for i, col_def in enumerate(table_meta.columns):
+                    if col_def.name == col_name:
+                        col_index = i
+                        break
+                
+                if col_index is None:
+                    return False
+                
+                # Get record value
+                record_value = record.get_value(col_index)
+                
+                # Get comparison value
+                if isinstance(where_expr.right, Literal):
+                    compare_value = where_expr.right.value
+                else:
+                    return False
+                
+                # Perform comparison
+                if where_expr.operator == '=':
+                    return record_value == compare_value
+                elif where_expr.operator == '!=':
+                    return record_value != compare_value
+                elif where_expr.operator == '<':
+                    return record_value < compare_value
+                elif where_expr.operator == '>':
+                    return record_value > compare_value
+                elif where_expr.operator == '<=':
+                    return record_value <= compare_value
+                elif where_expr.operator == '>=':
+                    return record_value >= compare_value
+        
+        return True
     
     def close(self) -> None:
         """Close the database."""

@@ -48,6 +48,27 @@ class CreateTableStatement(ASTNode):
 
 
 @dataclass
+class UpdateStatement(ASTNode):
+    """UPDATE statement AST node."""
+    table: str
+    assignments: List[tuple]  # List of (column_name, value) tuples
+    where: Optional['Expression'] = None
+    
+    def __repr__(self) -> str:
+        return f"UpdateStatement(table={self.table}, assignments={self.assignments}, where={self.where})"
+
+
+@dataclass
+class DeleteStatement(ASTNode):
+    """DELETE statement AST node."""
+    table: str
+    where: Optional['Expression'] = None
+    
+    def __repr__(self) -> str:
+        return f"DeleteStatement(table={self.table}, where={self.where})"
+
+
+@dataclass
 class ColumnDef:
     """Column definition in CREATE TABLE."""
     name: str
@@ -162,6 +183,10 @@ class Parser:
             return self.parse_insert()
         elif self.match(TokenType.CREATE):
             return self.parse_create_table()
+        elif self.match(TokenType.UPDATE):
+            return self.parse_update()
+        elif self.match(TokenType.DELETE):
+            return self.parse_delete()
         else:
             raise ParseError(f"Unexpected token: {self.current_token}")
     
@@ -251,6 +276,64 @@ class Parser:
         self.expect(TokenType.RPAREN)
         
         return CreateTableStatement(table=table, columns=columns)
+    
+    def parse_update(self) -> UpdateStatement:
+        """
+        Parse UPDATE statement.
+        
+        Grammar:
+        UPDATE table SET column = value [, column = value]* [WHERE expression]
+        """
+        self.expect(TokenType.UPDATE)
+        
+        table = self.expect(TokenType.IDENTIFIER).value
+        
+        self.expect(TokenType.SET)
+        
+        # Parse assignments
+        assignments = []
+        
+        # First assignment
+        col = self.expect(TokenType.IDENTIFIER).value
+        self.expect(TokenType.EQUALS)
+        val = self.parse_literal_value()
+        assignments.append((col, val))
+        
+        # Additional assignments
+        while self.match(TokenType.COMMA):
+            self.advance()
+            col = self.expect(TokenType.IDENTIFIER).value
+            self.expect(TokenType.EQUALS)
+            val = self.parse_literal_value()
+            assignments.append((col, val))
+        
+        # Optional WHERE clause
+        where = None
+        if self.match(TokenType.WHERE):
+            self.advance()
+            where = self.parse_expression()
+        
+        return UpdateStatement(table=table, assignments=assignments, where=where)
+    
+    def parse_delete(self) -> DeleteStatement:
+        """
+        Parse DELETE statement.
+        
+        Grammar:
+        DELETE FROM table [WHERE expression]
+        """
+        self.expect(TokenType.DELETE)
+        self.expect(TokenType.FROM)
+        
+        table = self.expect(TokenType.IDENTIFIER).value
+        
+        # Optional WHERE clause
+        where = None
+        if self.match(TokenType.WHERE):
+            self.advance()
+            where = self.parse_expression()
+        
+        return DeleteStatement(table=table, where=where)
     
     def parse_column_def(self) -> ColumnDef:
         """

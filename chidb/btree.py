@@ -528,22 +528,14 @@ class BTree:
             # Internal node - find which child to descend to
             idx = node.find_key_index(key)
             
-            # Check if we found an exact match
+            # If idx < num_keys, the key at idx is >= our search key
+            # So we should go to the child pointer at idx (which points left)
             if idx < node.num_keys:
-                found_key, child_page = node.read_cell(idx)
-                if found_key == key:
-                    # Key equals the separator, go right (to the next child or right_page)
-                    if idx + 1 < node.num_keys:
-                        _, next_child = node.read_cell(idx + 1)
-                        return self._search_recursive(next_child, key)
-                    elif node.right_page and node.right_page > 0:
-                        return self._search_recursive(node.right_page, key)
-                    return None
-                else:
-                    # Key at idx is > our search key, go to this child (left of separator)
-                    return self._search_recursive(child_page, key)
+                _, child_page = node.read_cell(idx)
+                return self._search_recursive(child_page, key)
             else:
-                # Key is greater than all keys, go to rightmost child
+                # Key is greater than all keys in this node
+                # Go to the rightmost child
                 if node.right_page and node.right_page > 0:
                     return self._search_recursive(node.right_page, key)
                 return None
@@ -583,3 +575,67 @@ class BTree:
     def get_root_page(self) -> int:
         """Get the root page ID."""
         return self.root_page
+    
+    def delete(self, key: int) -> bool:
+        """
+        Delete a key-record pair from the B-tree.
+        
+        Args:
+            key: The key to delete
+            
+        Returns:
+            True if deleted, False if key not found
+        """
+        return self._delete_recursive(self.root_page, key)
+    
+    def _delete_recursive(self, page_id: int, key: int) -> bool:
+        """
+        Recursively delete a key from the B-tree.
+        
+        Returns:
+            True if key was found and deleted
+        """
+        page_data = self.pager.read_page(page_id)
+        node = BTreeNode(page_id, page_data, self.pager.get_page_size())
+        
+        if node.is_leaf():
+            # Find the key
+            idx = node.find_key_index(key)
+            
+            if idx < node.num_keys:
+                found_key, _ = node.read_cell(idx)
+                if found_key == key:
+                    # Delete this cell
+                    self._delete_cell(node, idx)
+                    self.pager.write_page(node.page_id, bytes(node.page_data))
+                    return True
+            
+            return False
+        else:
+            # Internal node - find which child to descend to
+            idx = node.find_key_index(key)
+            
+            if idx < node.num_keys:
+                _, child_page = node.read_cell(idx)
+                return self._delete_recursive(child_page, key)
+            else:
+                if node.right_page and node.right_page > 0:
+                    return self._delete_recursive(node.right_page, key)
+                return False
+    
+    def update(self, key: int, record: Record) -> bool:
+        """
+        Update a record in the B-tree.
+        
+        Args:
+            key: The key to update
+            record: The new record data
+            
+        Returns:
+            True if updated, False if key not found
+        """
+        # Simple implementation: delete then insert
+        if self._delete_recursive(self.root_page, key):
+            self.insert(key, record)
+            return True
+        return False

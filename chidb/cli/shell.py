@@ -1,5 +1,5 @@
 """
-Interactive shell for YesDB.
+Interactive shell for ChiDB.
 Provides a command-line interface for database interaction.
 """
 
@@ -59,10 +59,9 @@ class Shell:
     
     def print_welcome(self) -> None:
         """Print welcome message."""
-        print("yes_db 🚀, The database for the future")
-        print("Relational database engine written entirely in Python, I'm still working on it!")
-        print("Enjoy your stay!")
-
+        print("yes_db - Educational Relational Database")
+        print("Enter SQL statements or .help for commands")
+        print()
     
     def execute_sql(self, sql: str) -> None:
         """
@@ -72,29 +71,53 @@ class Shell:
             sql: The SQL statement to execute
         """
         try:
+            # Parse to get column info for SELECT
+            from chidb.sql.lexer import Lexer
+            from chidb.sql.parser import Parser, SelectStatement
+            
+            lexer = Lexer(sql)
+            tokens = lexer.tokenize()
+            parser = Parser(tokens)
+            ast = parser.parse()
+            
+            # Store column info if it's a SELECT
+            selected_columns = None
+            table_name = None
+            if isinstance(ast, SelectStatement):
+                selected_columns = ast.columns
+                table_name = ast.table
+            
+            # Execute the query
             results = self.db.execute(sql)
             
             if results:
-                # Print results
-                self.print_results(results)
+                # Print results with column information
+                self.print_results(results, selected_columns, table_name)
             else:
                 print("OK")
         
         except Exception as e:
             print(f"SQL Error: {e}")
     
-    def print_results(self, results: list) -> None:
+    def print_results(self, results: list, selected_columns: list = None, table_name: str = None) -> None:
         """
         Print query results in a formatted table.
         
         Args:
             results: List of result rows
+            selected_columns: List of column names that were selected
+            table_name: Name of the table being queried
         """
         if not results:
             print("(no rows)")
             return
         
         from chidb.record import Record
+        
+        # Get table metadata if available
+        table_meta = None
+        if table_name and hasattr(self.db, 'table_metadata'):
+            table_meta = self.db.table_metadata.get(table_name)
         
         # Extract all values from results
         rows_data = []
@@ -103,8 +126,23 @@ class Shell:
             for value in row:
                 # Check if value is a Record object
                 if isinstance(value, Record):
-                    # Extract all values from the record
-                    row_values.extend(value.get_values())
+                    all_values = value.get_values()
+                    
+                    # Filter columns if specific columns were requested
+                    if selected_columns and selected_columns != ['*'] and table_meta:
+                        # Map column names to indices
+                        filtered_values = []
+                        for col_name in selected_columns:
+                            # Find the index of this column
+                            for i, col_def in enumerate(table_meta.columns):
+                                if col_def.name == col_name:
+                                    if i < len(all_values):
+                                        filtered_values.append(all_values[i])
+                                    break
+                        row_values.extend(filtered_values)
+                    else:
+                        # Use all values
+                        row_values.extend(all_values)
                 elif value is None:
                     row_values.append('NULL')
                 else:
@@ -116,7 +154,7 @@ class Shell:
             return
         
         # Calculate column widths
-        num_cols = len(rows_data[0])
+        num_cols = len(rows_data[0]) if rows_data else 0
         col_widths = [0] * num_cols
         
         for row in rows_data:

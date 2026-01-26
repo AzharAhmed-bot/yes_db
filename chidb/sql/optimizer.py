@@ -6,6 +6,7 @@ Performs query optimization before code generation.
 from typing import Any
 from chidb.sql.parser import (
     ASTNode, SelectStatement, InsertStatement, CreateTableStatement,
+    UpdateStatement, DeleteStatement,
     Expression, BinaryOp, Literal, Identifier
 )
 
@@ -41,6 +42,10 @@ class Optimizer:
             return self.optimize_insert(ast)
         elif isinstance(ast, CreateTableStatement):
             return self.optimize_create_table(ast)
+        elif isinstance(ast, UpdateStatement):
+            return self.optimize_update(ast)
+        elif isinstance(ast, DeleteStatement):
+            return self.optimize_delete(ast)
         else:
             return ast
     
@@ -74,6 +79,26 @@ class Optimizer:
         
         For now, CREATE TABLE statements don't need optimization.
         """
+        return stmt
+    
+    def optimize_update(self, stmt: UpdateStatement) -> UpdateStatement:
+        """
+        Optimize an UPDATE statement.
+        """
+        # Optimize WHERE clause if present
+        if stmt.where:
+            stmt.where = self.optimize_expression(stmt.where)
+        
+        return stmt
+    
+    def optimize_delete(self, stmt: DeleteStatement) -> DeleteStatement:
+        """
+        Optimize a DELETE statement.
+        """
+        # Optimize WHERE clause if present
+        if stmt.where:
+            stmt.where = self.optimize_expression(stmt.where)
+        
         return stmt
     
     def optimize_expression(self, expr: Expression) -> Expression:

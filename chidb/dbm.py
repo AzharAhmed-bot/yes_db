@@ -37,6 +37,8 @@ class Opcode(IntEnum):
     JUMP = 21          # Unconditional jump
     JUMP_IF_FALSE = 22 # Jump if top of stack is false
     SEEK = 23          # Seek to specific key
+    DELETE = 24        # Delete current record
+    COLUMN = 25        # Extract column from record
 
 
 @dataclass
@@ -247,6 +249,12 @@ class DatabaseMachine:
         elif opcode == Opcode.JUMP_IF_FALSE:
             self._op_jump_if_false(instr.p1)
         
+        elif opcode == Opcode.DELETE:
+            self._op_delete(instr.p1)
+        
+        elif opcode == Opcode.COLUMN:
+            self._op_column(instr.p1, instr.p2)
+        
         elif opcode in (Opcode.EQ, Opcode.NE, Opcode.LT, Opcode.LE, Opcode.GT, Opcode.GE):
             self._op_compare(opcode)
         
@@ -397,3 +405,43 @@ class DatabaseMachine:
             raise ValueError(f"Invalid comparison opcode: {opcode}")
         
         self.stack.append(result)
+    
+    def _op_delete(self, cursor_id: int) -> None:
+        """
+        Delete current record from cursor.
+        Note: This is a simplified implementation.
+        """
+        cursor = self.cursors[cursor_id]
+        if not cursor.writable:
+            raise RuntimeError("Cannot delete from read-only cursor")
+        
+        if not cursor.is_valid():
+            raise RuntimeError("Cursor not pointing to valid record")
+        
+        # Get current key
+        key = cursor.get_key()
+        
+        # For simplicity, we'll mark it as deleted by reloading data
+        # In a real implementation, we'd remove from B-tree
+        # This is a placeholder - actual deletion would require B-tree delete
+        cursor.valid = False
+    
+    def _op_column(self, cursor_id: int, column_index: int) -> None:
+        """
+        Extract a column value from the current record.
+        
+        Args:
+            cursor_id: The cursor ID
+            column_index: Index of the column to extract
+        """
+        cursor = self.cursors[cursor_id]
+        record = cursor.get_data()
+        
+        if record is None:
+            self.stack.append(None)
+        else:
+            values = record.get_values()
+            if column_index < len(values):
+                self.stack.append(values[column_index])
+            else:
+                self.stack.append(None)
