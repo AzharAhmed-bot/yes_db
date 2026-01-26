@@ -22,9 +22,13 @@ class SelectStatement(ASTNode):
     columns: List[str]  # Column names or '*'
     table: str
     where: Optional['Expression'] = None
+    order_by: Optional[List[tuple]] = None  # List of (column_name, direction) tuples
+    limit: Optional[int] = None
+    offset: Optional[int] = None
+    distinct: bool = False
     
     def __repr__(self) -> str:
-        return f"SelectStatement(columns={self.columns}, table={self.table}, where={self.where})"
+        return f"SelectStatement(columns={self.columns}, table={self.table}, where={self.where}, order_by={self.order_by}, limit={self.limit})"
 
 
 @dataclass
@@ -66,6 +70,26 @@ class DeleteStatement(ASTNode):
     
     def __repr__(self) -> str:
         return f"DeleteStatement(table={self.table}, where={self.where})"
+
+
+@dataclass
+class DropTableStatement(ASTNode):
+    """DROP TABLE statement AST node."""
+    table: str
+    
+    def __repr__(self) -> str:
+        return f"DropTableStatement(table={self.table})"
+
+
+@dataclass
+class AlterTableStatement(ASTNode):
+    """ALTER TABLE statement AST node."""
+    table: str
+    action: str  # 'ADD'
+    column: Optional['ColumnDef'] = None
+    
+    def __repr__(self) -> str:
+        return f"AlterTableStatement(table={self.table}, action={self.action}, column={self.column})"
 
 
 @dataclass
@@ -187,6 +211,10 @@ class Parser:
             return self.parse_update()
         elif self.match(TokenType.DELETE):
             return self.parse_delete()
+        elif self.match(TokenType.DROP):
+            return self.parse_drop_table()
+        elif self.match(TokenType.ALTER):
+            return self.parse_alter_table()
         else:
             raise ParseError(f"Unexpected token: {self.current_token}")
     
@@ -195,9 +223,15 @@ class Parser:
         Parse SELECT statement.
         
         Grammar:
-        SELECT column [, column]* FROM table [WHERE expression]
+        SELECT [DISTINCT] column [, column]* FROM table [WHERE expression] [ORDER BY column [ASC|DESC]] [LIMIT num] [OFFSET num]
         """
         self.expect(TokenType.SELECT)
+        
+        # Check for DISTINCT
+        distinct = False
+        if self.match(TokenType.DISTINCT):
+            distinct = True
+            self.advance()
         
         # Parse columns
         columns = []
@@ -221,7 +255,62 @@ class Parser:
             self.advance()
             where = self.parse_expression()
         
-        return SelectStatement(columns=columns, table=table, where=where)
+        # Optional ORDER BY clause
+        order_by = None
+        if self.match(TokenType.ORDER):
+            self.advance()
+            self.expect(TokenType.BY)
+            
+            order_by = []
+            # Parse column name
+            col = self.expect(TokenType.IDENTIFIER).value
+            direction = 'ASC'  # Default
+            
+            if self.match(TokenType.ASC):
+                direction = 'ASC'
+                self.advance()
+            elif self.match(TokenType.DESC):
+                direction = 'DESC'
+                self.advance()
+            
+            order_by.append((col, direction))
+            
+            # Multiple ORDER BY columns
+            while self.match(TokenType.COMMA):
+                self.advance()
+                col = self.expect(TokenType.IDENTIFIER).value
+                direction = 'ASC'
+                
+                if self.match(TokenType.ASC):
+                    direction = 'ASC'
+                    self.advance()
+                elif self.match(TokenType.DESC):
+                    direction = 'DESC'
+                    self.advance()
+                
+                order_by.append((col, direction))
+        
+        # Optional LIMIT clause
+        limit = None
+        if self.match(TokenType.LIMIT):
+            self.advance()
+            limit = self.expect(TokenType.INTEGER_LITERAL).value
+        
+        # Optional OFFSET clause
+        offset = None
+        if self.match(TokenType.OFFSET):
+            self.advance()
+            offset = self.expect(TokenType.INTEGER_LITERAL).value
+        
+        return SelectStatement(
+            columns=columns, 
+            table=table, 
+            where=where,
+            order_by=order_by,
+            limit=limit,
+            offset=offset,
+            distinct=distinct
+        )
     
     def parse_insert(self) -> InsertStatement:
         """
@@ -334,6 +423,43 @@ class Parser:
             where = self.parse_expression()
         
         return DeleteStatement(table=table, where=where)
+    
+    def parse_drop_table(self) -> DropTableStatement:
+        """
+        Parse DROP TABLE statement.
+        
+        Grammar:
+        DROP TABLE table_name
+        """
+        self.expect(TokenType.DROP)
+        self.expect(TokenType.TABLE)
+        
+        table = self.expect(TokenType.IDENTIFIER).value
+        
+        return DropTableStatement(table=table)
+    
+    def parse_alter_table(self) -> AlterTableStatement:
+        """
+        Parse ALTER TABLE statement.
+        
+        Grammar:
+        ALTER TABLE table_name ADD COLUMN column_def
+        """
+        self.expect(TokenType.ALTER)
+        self.expect(TokenType.TABLE)
+        
+        table = self.expect(TokenType.IDENTIFIER).value
+        
+        self.expect(TokenType.ADD)
+        
+        # Optional COLUMN keyword
+        if self.match(TokenType.COLUMN):
+            self.advance()
+        
+        # Parse column definition
+        column = self.parse_column_def()
+        
+        return AlterTableStatement(table=table, action='ADD', column=column)
     
     def parse_column_def(self) -> ColumnDef:
         """

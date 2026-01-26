@@ -31,6 +31,22 @@ class TokenType(Enum):
     NULL = auto()
     PRIMARY = auto()
     KEY = auto()
+    ORDER = auto()
+    BY = auto()
+    ASC = auto()
+    DESC = auto()
+    LIMIT = auto()
+    OFFSET = auto()
+    DISTINCT = auto()
+    DROP = auto()
+    ALTER = auto()
+    ADD = auto()
+    COLUMN = auto()
+    COUNT = auto()
+    SUM = auto()
+    AVG = auto()
+    MIN = auto()
+    MAX = auto()
     
     # Literals
     INTEGER_LITERAL = auto()
@@ -98,6 +114,22 @@ KEYWORDS = {
     'NULL': TokenType.NULL,
     'PRIMARY': TokenType.PRIMARY,
     'KEY': TokenType.KEY,
+    'ORDER': TokenType.ORDER,
+    'BY': TokenType.BY,
+    'ASC': TokenType.ASC,
+    'DESC': TokenType.DESC,
+    'LIMIT': TokenType.LIMIT,
+    'OFFSET': TokenType.OFFSET,
+    'DISTINCT': TokenType.DISTINCT,
+    'DROP': TokenType.DROP,
+    'ALTER': TokenType.ALTER,
+    'ADD': TokenType.ADD,
+    'COLUMN': TokenType.COLUMN,
+    'COUNT': TokenType.COUNT,
+    'SUM': TokenType.SUM,
+    'AVG': TokenType.AVG,
+    'MIN': TokenType.MIN,
+    'MAX': TokenType.MAX,
 }
 
 

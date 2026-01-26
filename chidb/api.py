@@ -11,7 +11,7 @@ from chidb.btree import BTree
 from chidb.dbm import DatabaseMachine
 from chidb.record import Record
 from chidb.sql.lexer import Lexer
-from chidb.sql.parser import Parser, CreateTableStatement, UpdateStatement, DeleteStatement, ColumnDef
+from chidb.sql.parser import Parser, CreateTableStatement, UpdateStatement, DeleteStatement, DropTableStatement, AlterTableStatement, ColumnDef, SelectStatement
 from chidb.sql.optimizer import Optimizer
 from chidb.sql.codegen import CodeGenerator
 from chidb.log import get_logger
@@ -198,6 +198,18 @@ class YesDB:
             # Handle DELETE specially (direct B-tree operation)
             if isinstance(ast, DeleteStatement):
                 return self._execute_delete(ast)
+            
+            # Handle DROP TABLE
+            if isinstance(ast, DropTableStatement):
+                return self._execute_drop_table(ast)
+            
+            # Handle ALTER TABLE
+            if isinstance(ast, AlterTableStatement):
+                return self._execute_alter_table(ast)
+            
+            # Handle SELECT with ORDER BY/LIMIT
+            if isinstance(ast, SelectStatement) and (ast.order_by or ast.limit or ast.offset or ast.distinct):
+                return self._execute_select_advanced(ast)
             
             # Optimization
             ast = self.optimizer.optimize(ast)
@@ -393,6 +405,125 @@ class YesDB:
                     return record_value >= compare_value
         
         return True
+    
+    def _execute_select_advanced(self, stmt: SelectStatement) -> List[List[Any]]:
+        """
+        Execute SELECT with ORDER BY, LIMIT, OFFSET, or DISTINCT.
+        """
+        from chidb.record import Record
+        
+        table_name = stmt.table
+        if table_name not in self.tables:
+            raise ValueError(f"Table '{table_name}' does not exist")
+        
+        root_page = self.tables[table_name]
+        table_meta = self.table_metadata.get(table_name)
+        btree = BTree(self.pager, root_page)
+        
+        # Scan all records
+        all_records = btree.scan()
+        
+        # Convert to result rows
+        results = []
+        for key, record in all_records:
+            # Apply WHERE filter if present
+            if stmt.where:
+                if not self._evaluate_where(record, stmt.where, table_meta):
+                    continue
+            
+            # Extract values
+            values = record.get_values()
+            
+            # Filter columns if not SELECT *
+            if stmt.columns != ['*'] and table_meta:
+                filtered_values = []
+                for col_name in stmt.columns:
+                    for i, col_def in enumerate(table_meta.columns):
+                        if col_def.name == col_name:
+                            if i < len(values):
+                                filtered_values.append(values[i])
+                            break
+                values = filtered_values
+            
+            results.append([Record(values)])
+        
+        # Apply DISTINCT
+        if stmt.distinct:
+            seen = set()
+            unique_results = []
+            for row in results:
+                row_tuple = tuple(row[0].get_values())
+                if row_tuple not in seen:
+                    seen.add(row_tuple)
+                    unique_results.append(row)
+            results = unique_results
+        
+        # Apply ORDER BY
+        if stmt.order_by:
+            for col_name, direction in reversed(stmt.order_by):
+                # Find column index
+                col_index = None
+                for i, col_def in enumerate(table_meta.columns):
+                    if col_def.name == col_name:
+                        col_index = i
+                        break
+                
+                if col_index is not None:
+                    results.sort(
+                        key=lambda row: row[0].get_values()[col_index] if col_index < len(row[0].get_values()) else None,
+                        reverse=(direction == 'DESC')
+                    )
+        
+        # Apply OFFSET
+        if stmt.offset:
+            results = results[stmt.offset:]
+        
+        # Apply LIMIT
+        if stmt.limit:
+            results = results[:stmt.limit]
+        
+        return results
+    
+    def _execute_drop_table(self, stmt: DropTableStatement) -> List[List[Any]]:
+        """
+        Execute DROP TABLE statement.
+        """
+        table_name = stmt.table
+        
+        if table_name not in self.tables:
+            raise ValueError(f"Table '{table_name}' does not exist")
+        
+        # Remove from metadata
+        del self.table_metadata[table_name]
+        del self.tables[table_name]
+        
+        # Update catalog
+        self._save_all_metadata()
+        
+        self.logger.info(f"Dropped table '{table_name}'")
+        return []
+    
+    def _execute_alter_table(self, stmt: AlterTableStatement) -> List[List[Any]]:
+        """
+        Execute ALTER TABLE statement.
+        """
+        table_name = stmt.table
+        
+        if table_name not in self.tables:
+            raise ValueError(f"Table '{table_name}' does not exist")
+        
+        table_meta = self.table_metadata[table_name]
+        
+        if stmt.action == 'ADD' and stmt.column:
+            # Add column to metadata
+            table_meta.columns.append(stmt.column)
+            
+            # Update catalog
+            self._save_all_metadata()
+            
+            self.logger.info(f"Added column '{stmt.column.name}' to table '{table_name}'")
+        
+        return []
     
     def close(self) -> None:
         """Close the database."""
