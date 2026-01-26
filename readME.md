@@ -4,6 +4,9 @@
 
 ---
 
+## Notice
+**The database is currently still under development, its advised to use for storages that do not exceed 100 ROWS of data for each table , otherwise the data is LOST. REASON: I'M STILL FINDING OUT, BUT TO GIVE YOU AN IDEA IT HAS TO DO WITH INCONSISTENT PAGE CACHING**
+
 
 ## Architecture Overview
 
