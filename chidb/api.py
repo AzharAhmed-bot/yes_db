@@ -5,6 +5,7 @@ Provides high-level interface for applications to interact with the database.
 
 from typing import List, Any, Optional, Dict
 from dataclasses import dataclass
+import json
 from chidb.pager import Pager
 from chidb.btree import BTree
 from chidb.dbm import DatabaseMachine
@@ -16,6 +17,10 @@ from chidb.sql.codegen import CodeGenerator
 from chidb.log import get_logger
 
 
+# System catalog constants
+SYSTEM_CATALOG_PAGE = 1  # Reserved page for system catalog
+
+
 @dataclass
 class TableMetadata:
     """Metadata about a table."""
@@ -24,6 +29,42 @@ class TableMetadata:
     columns: List[ColumnDef]
     primary_key_column: Optional[str] = None
     next_auto_increment: int = 1
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+        return {
+            'name': self.name,
+            'root_page': self.root_page,
+            'columns': [
+                {
+                    'name': col.name,
+                    'type': col.type,
+                    'primary_key': col.primary_key
+                }
+                for col in self.columns
+            ],
+            'primary_key_column': self.primary_key_column,
+            'next_auto_increment': self.next_auto_increment
+        }
+    
+    @staticmethod
+    def from_dict(data: dict) -> 'TableMetadata':
+        """Create from dictionary."""
+        columns = [
+            ColumnDef(
+                name=col['name'],
+                type=col['type'],
+                primary_key=col['primary_key']
+            )
+            for col in data['columns']
+        ]
+        return TableMetadata(
+            name=data['name'],
+            root_page=data['root_page'],
+            columns=columns,
+            primary_key_column=data.get('primary_key_column'),
+            next_auto_increment=data.get('next_auto_increment', 1)
+        )
 
 
 class YesDB:
@@ -67,9 +108,65 @@ class YesDB:
     
     def _initialize(self) -> None:
         """Initialize database (load metadata if it exists)."""
-        # For now, we don't have a system catalog
-        # Tables need to be created in each session
-        pass
+        # Check if this is a new database or existing
+        if self.pager.get_num_pages() <= 1:
+            # New database - create system catalog
+            self._create_system_catalog()
+        else:
+            # Existing database - load system catalog
+            self._load_system_catalog()
+    
+    def _create_system_catalog(self) -> None:
+        """Create the system catalog B-tree."""
+        # Create a B-tree for the system catalog
+        self.catalog_btree = BTree(self.pager)
+        self.catalog_root = self.catalog_btree.get_root_page()
+        self.logger.info(f"Created system catalog at page {self.catalog_root}")
+    
+    def _load_system_catalog(self) -> None:
+        """Load table metadata from system catalog."""
+        # The catalog is at a known page (page 1)
+        self.catalog_root = SYSTEM_CATALOG_PAGE
+        self.catalog_btree = BTree(self.pager, self.catalog_root)
+        
+        # Scan the catalog and load all table metadata
+        try:
+            catalog_records = self.catalog_btree.scan()
+            
+            for key, record in catalog_records:
+                # Record contains JSON-serialized table metadata
+                json_data = record.get_value(0)
+                if json_data:
+                    metadata_dict = json.loads(json_data)
+                    metadata = TableMetadata.from_dict(metadata_dict)
+                    
+                    self.table_metadata[metadata.name] = metadata
+                    self.tables[metadata.name] = metadata.root_page
+                    
+                    self.logger.info(f"Loaded table '{metadata.name}' from catalog")
+        except Exception as e:
+            self.logger.warning(f"Could not load system catalog: {e}")
+            # If catalog is corrupt, start fresh
+            self.catalog_btree = BTree(self.pager, self.catalog_root)
+    
+    def _save_table_to_catalog(self, metadata: TableMetadata) -> None:
+        """Save table metadata to system catalog."""
+        # Serialize metadata to JSON
+        metadata_dict = metadata.to_dict()
+        json_data = json.dumps(metadata_dict)
+        
+        # Create a record with the JSON data
+        record = Record([json_data])
+        
+        # Use a simple key (could use hash of table name)
+        # For simplicity, use incremental keys
+        key = len(self.table_metadata)
+        
+        # Insert into catalog
+        self.catalog_btree.insert(key, record)
+        self.pager.flush()
+        
+        self.logger.info(f"Saved table '{metadata.name}' to catalog")
     
     def execute(self, sql: str) -> List[List[Any]]:
         """
@@ -153,6 +250,9 @@ class YesDB:
         # Register the table
         self.table_metadata[table_name] = metadata
         self.tables[table_name] = root_page
+        
+        # Save to system catalog
+        self._save_table_to_catalog(metadata)
         
         self.logger.info(f"Created table '{table_name}' with root page {root_page}, PK: {primary_key_column}")
         
@@ -296,8 +396,39 @@ class YesDB:
     
     def close(self) -> None:
         """Close the database."""
+        # Save all table metadata before closing
+        self._save_all_metadata()
+        
         self.pager.close()
         self.logger.info(f"Closed database '{self.filename}'")
+    
+    def _save_all_metadata(self) -> None:
+        """Save all table metadata to catalog."""
+        # Clear catalog and rewrite all metadata
+        # This ensures auto-increment counters are saved
+        
+        # For simplicity, we'll just update existing entries
+        # A full implementation would rebuild the catalog
+        
+        try:
+            # Re-save each table's metadata
+            catalog_records = self.catalog_btree.scan()
+            
+            # Delete all existing catalog entries
+            for key, _ in catalog_records:
+                self.catalog_btree.delete(key)
+            
+            # Re-insert all current metadata
+            for i, (table_name, metadata) in enumerate(self.table_metadata.items()):
+                metadata_dict = metadata.to_dict()
+                json_data = json.dumps(metadata_dict)
+                record = Record([json_data])
+                self.catalog_btree.insert(i + 1, record)
+            
+            self.pager.flush()
+            self.logger.info("Saved all table metadata to catalog")
+        except Exception as e:
+            self.logger.error(f"Error saving metadata: {e}")
     
     def get_table_names(self) -> List[str]:
         """Get list of table names."""

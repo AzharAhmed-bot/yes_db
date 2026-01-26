@@ -94,7 +94,7 @@ class Shell:
                 # Print results with column information
                 self.print_results(results, selected_columns, table_name)
             else:
-                print("OK")
+                print("Query executed")
         
         except Exception as e:
             print(f"SQL Error: {e}")
