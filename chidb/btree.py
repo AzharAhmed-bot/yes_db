@@ -211,7 +211,7 @@ class BTree:
         
         # Insert the split key with left child pointer
         self._insert_internal_cell(new_root, 0, split_key, left_page)
-        
+
         # Update root page
         self.root_page = new_root_id
         self.logger.info(f"Created new root at page {new_root_id}")
@@ -228,7 +228,7 @@ class BTree:
         
         record_data = record.encode()
         split_result = self._insert_recursive(self.root_page, key, record_data)
-        
+
         # If root was split, create a new root
         if split_result is not None:
             split_key, new_page = split_result
@@ -282,27 +282,30 @@ class BTree:
     def _insert_into_internal(self, node: BTreeNode, key: int, record_data: bytes) -> Optional[Tuple[int, int]]:
         """
         Insert into an internal node.
-        
+
         Returns:
             None if no split, or (split_key, new_page_id) if split
         """
         # Find which child to descend to
         insert_idx = node.find_key_index(key)
-        
+
         if insert_idx < node.num_keys:
             _, child_page = node.read_cell(insert_idx)
         else:
             child_page = node.right_page
-        
+
         # Recursively insert into child
         split_result = self._insert_recursive(child_page, key, record_data)
-        
+
         if split_result is None:
             return None
-        
+
         # Child was split, insert the split key into this node
+        # split_result returns (split_key, new_page) where:
+        # - child_page (the original) is now the LEFT child with keys < split_key
+        # - new_page is the RIGHT child with keys >= split_key
         split_key, new_page = split_result
-        return self._insert_split_into_internal(node, split_key, new_page)
+        return self._insert_split_into_internal(node, split_key, child_page, new_page, insert_idx)
     
     def _insert_leaf_cell(self, node: BTreeNode, index: int, key: int, record_data: bytes) -> None:
         """Insert a cell into a leaf node at the specified index."""
@@ -425,77 +428,155 @@ class BTree:
         split_key, _ = all_cells[split_point]
         return split_key, new_page_id
     
-    def _insert_split_into_internal(self, node: BTreeNode, split_key: int, new_page: int) -> Optional[Tuple[int, int]]:
-        """Insert a split result into an internal node."""
-        # Find insertion point
+    def _insert_split_into_internal(self, node: BTreeNode, split_key: int, left_child: int, right_child: int, child_idx: int) -> Optional[Tuple[int, int]]:
+        """
+        Insert a split result into an internal node.
+
+        Args:
+            node: The internal node to insert into
+            split_key: The key that separates left and right children
+            left_child: The left child (keys < split_key)
+            right_child: The right child (keys >= split_key)
+            child_idx: The index where we descended to the child that split
+        """
+        # Find insertion point for the split key
         insert_idx = node.find_key_index(split_key)
-        
-        # Create cell
-        cell_data = pack_varint(split_key) + pack_uint32(new_page)
-        
-        # Check if we need to split
+
+        # Create cell for left child
+        cell_data = pack_varint(split_key) + pack_uint32(left_child)
+
+        # Check if we need to split this node
         if self._needs_split(node, len(cell_data)):
-            return self._split_internal(node, split_key, new_page, insert_idx)
-        
-        # Insert the cell
-        self._insert_internal_cell(node, insert_idx, split_key, new_page)
+            return self._split_internal(node, split_key, left_child, right_child, insert_idx, child_idx)
+
+        # Before insertion, check if we're inserting at a position where
+        # the child came from right_page (i.e., child_idx >= original num_keys)
+        old_num_keys = node.num_keys
+        old_right_page = node.right_page
+
+        # Insert (split_key, left_child) at insert_idx
+        self._insert_internal_cell(node, insert_idx, split_key, left_child)
+
+        # Update the next position to point to right_child
+        # After insertion, the old cell at insert_idx is now at insert_idx+1
+        if child_idx < old_num_keys:
+            # The child that split was a regular cell (not right_page)
+            # Update the cell that was pushed to insert_idx+1
+            self._update_internal_cell_child(node, insert_idx + 1, right_child)
+        else:
+            # The child that split was right_page
+            # Now right_page should point to right_child
+            node.page_data[3:7] = pack_uint32(right_child)
+            node.right_page = right_child
+            self.pager.write_page(node.page_id, bytes(node.page_data))
+
         return None
     
     def _insert_internal_cell(self, node: BTreeNode, index: int, key: int, child_page: int) -> None:
         """Insert a cell into an internal node."""
         cell_data = pack_varint(key) + pack_uint32(child_page)
-        
+
         free_offset = self._find_free_space(node)
         cell_offset = free_offset - len(cell_data)
         node.page_data[cell_offset:cell_offset + len(cell_data)] = cell_data
-        
+
         # Shift cell pointers
         pointer_start = NODE_HEADER_SIZE
         for i in range(node.num_keys, index, -1):
             old_offset = unpack_uint16(node.page_data, pointer_start + (i - 1) * 2)
             node.page_data[pointer_start + i * 2:pointer_start + i * 2 + 2] = pack_uint16(old_offset)
-        
+
         # Write new cell pointer
         node.page_data[pointer_start + index * 2:pointer_start + index * 2 + 2] = pack_uint16(cell_offset)
-        
+
         # Update num_keys
         node.num_keys += 1
         node.page_data[1:3] = pack_uint16(node.num_keys)
-        
+
+        self.pager.write_page(node.page_id, bytes(node.page_data))
+
+    def _update_internal_cell_child(self, node: BTreeNode, index: int, new_child_page: int) -> None:
+        """Update the child page pointer in an internal cell."""
+        # Get the current cell offset
+        cell_offset = node.get_cell_offset(index)
+
+        # Read the key to know how many bytes to skip
+        key, key_bytes = unpack_varint(node.page_data, cell_offset)
+
+        # Update the child page (4 bytes after the key)
+        child_offset = cell_offset + key_bytes
+        node.page_data[child_offset:child_offset + 4] = pack_uint32(new_child_page)
+
         self.pager.write_page(node.page_id, bytes(node.page_data))
     
-    def _split_internal(self, node: BTreeNode, key: int, child_page: int, insert_idx: int) -> Tuple[int, int]:
-        """Split an internal node."""
+    def _split_internal(self, node: BTreeNode, key: int, left_child: int, right_child: int, insert_idx: int, child_idx: int) -> Tuple[int, int]:
+        """
+        Split an internal node.
+
+        Args:
+            node: The node to split
+            key: The split key from child split
+            left_child: The left child from child split
+            right_child: The right child from child split
+            insert_idx: Where to insert the split key
+            child_idx: The original child index that split
+        """
         log_btree_split(node.page_id)
-        
+
         new_page_id = self._create_internal_node()
-        
+
         # Collect all cells
         all_cells = []
         for i in range(node.num_keys):
             k, child = node.read_cell(i)
             all_cells.append((k, child))
-        
-        all_cells.insert(insert_idx, (key, child_page))
-        
+
+        # Save old_right_page before modification
+        old_right_page = node.right_page
+
+        # Insert (key, left_child) at insert_idx
+        all_cells.insert(insert_idx, (key, left_child))
+
+        # Update the cell/right_page after insert_idx to point to right_child
+        if child_idx < len(all_cells) - 1:  # -1 because we just added one
+            # The child that split was a regular cell
+            k, _ = all_cells[insert_idx + 1]
+            all_cells[insert_idx + 1] = (k, right_child)
+        else:
+            # The child that split was right_page
+            old_right_page = right_child
+
         split_point = len(all_cells) // 2
-        
+
         # Clear and rebuild nodes
         node.num_keys = 0
         node.page_data[1:3] = pack_uint16(0)
-        
+
+        # Insert first half into left node (original)
         for i in range(split_point):
             k, child = all_cells[i]
             self._insert_internal_cell(node, i, k, child)
-        
+
+        # The split key's child becomes the right_page of the left node
+        split_key, split_child = all_cells[split_point]
+        node.page_data[3:7] = pack_uint32(split_child)
+        node.right_page = split_child
+        self.pager.write_page(node.page_id, bytes(node.page_data))
+
+        # Load new node
         new_page_data = self.pager.read_page(new_page_id)
         new_node = BTreeNode(new_page_id, new_page_data, self.pager.get_page_size())
-        
+
+        # Insert second half into right node (new)
         for i in range(split_point + 1, len(all_cells)):
             k, child = all_cells[i]
             self._insert_internal_cell(new_node, i - split_point - 1, k, child)
-        
-        split_key, _ = all_cells[split_point]
+
+        # Transfer the old right_page to the new node
+        new_node.page_data[3:7] = pack_uint32(old_right_page if old_right_page else 0)
+        new_node.right_page = old_right_page
+        self.pager.write_page(new_page_id, bytes(new_node.page_data))
+
         return split_key, new_page_id
     
     def search(self, key: int) -> Optional[Record]:
@@ -555,7 +636,8 @@ class BTree:
         """Recursively scan the tree."""
         page_data = self.pager.read_page(page_id)
         node = BTreeNode(page_id, page_data, self.pager.get_page_size())
-        
+
+
         if node.is_leaf():
             # Add all records from this leaf
             for i in range(node.num_keys):
@@ -567,7 +649,7 @@ class BTree:
             for i in range(node.num_keys):
                 key, child_page = node.read_cell(i)
                 self._scan_recursive(child_page, results)
-            
+
             # Don't forget the rightmost child
             if node.right_page:
                 self._scan_recursive(node.right_page, results)

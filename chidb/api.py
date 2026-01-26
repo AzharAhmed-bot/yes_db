@@ -221,7 +221,25 @@ class YesDB:
             
             # Execution
             results = self.dbm.execute(instructions)
-            
+
+            # Sync root page changes from BTrees back to metadata
+            # (splits may have created new roots)
+            metadata_changed = False
+            for root_page, btree in list(self.dbm.btrees.items()):
+                if btree.root_page != root_page:
+                    # Root page changed, update metadata
+                    for table_name, metadata in self.table_metadata.items():
+                        if metadata.root_page == root_page:
+                            metadata.root_page = btree.root_page
+                            self._save_table_to_catalog(metadata)
+                            metadata_changed = True
+                            break
+
+            # Clear the btrees cache to force fresh lookups with updated metadata
+            # This ensures subsequent operations use the correct root pages
+            if metadata_changed:
+                self.dbm.btrees.clear()
+
             return results
         
         except Exception as e:

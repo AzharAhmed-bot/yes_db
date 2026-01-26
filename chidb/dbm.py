@@ -188,7 +188,9 @@ class DatabaseMachine:
     def reset(self) -> None:
         """Reset the machine state."""
         self.cursors.clear()
-        self.btrees.clear()
+        # DO NOT clear btrees - they should persist across executions
+        # to preserve root_page changes from splits
+        # self.btrees.clear()
         self.stack.clear()
         self.result_rows.clear()
         self.pc = 0
@@ -273,7 +275,7 @@ class DatabaseMachine:
         """Open a table for writing."""
         if root_page not in self.btrees:
             self.btrees[root_page] = BTree(self.pager, root_page)
-        
+
         btree = self.btrees[root_page]
         self.cursors[cursor_id] = Cursor(btree, writable=True)
     
