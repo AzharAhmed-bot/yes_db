@@ -231,6 +231,8 @@ class YesDB:
                     for table_name, metadata in self.table_metadata.items():
                         if metadata.root_page == root_page:
                             metadata.root_page = btree.root_page
+                            # CRITICAL FIX: Also update self.tables dict
+                            self.tables[table_name] = btree.root_page
                             self._save_table_to_catalog(metadata)
                             metadata_changed = True
                             break

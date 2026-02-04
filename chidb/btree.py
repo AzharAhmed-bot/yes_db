@@ -608,12 +608,28 @@ class BTree:
         else:
             # Internal node - find which child to descend to
             idx = node.find_key_index(key)
-            
-            # If idx < num_keys, the key at idx is >= our search key
-            # So we should go to the child pointer at idx (which points left)
+
+            # In our B-tree structure:
+            # cell[i] = (key[i], child[i]) where child[i] contains keys < key[i]
+            # right_page contains keys >= key[last]
+
+            # If idx < num_keys, cell[idx].key >= search_key
             if idx < node.num_keys:
-                _, child_page = node.read_cell(idx)
-                return self._search_recursive(child_page, key)
+                separator_key, child_page = node.read_cell(idx)
+
+                # If search key < separator key, go to left child
+                if key < separator_key:
+                    return self._search_recursive(child_page, key)
+                # If search key >= separator key, go to right subtree
+                # (either next cell's child or right_page)
+                elif idx + 1 < node.num_keys:
+                    _, next_child_page = node.read_cell(idx + 1)
+                    return self._search_recursive(next_child_page, key)
+                else:
+                    # No more cells, go to right_page
+                    if node.right_page and node.right_page > 0:
+                        return self._search_recursive(node.right_page, key)
+                    return None
             else:
                 # Key is greater than all keys in this node
                 # Go to the rightmost child
