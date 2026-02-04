@@ -8,6 +8,12 @@
 **The database is currently still under development, its advised to use for storages that do not exceed 100 ROWS of data for each table , otherwise the data is LOST. REASON: I'M STILL FINDING OUT, BUT TO GIVE YOU AN IDEA IT HAS TO DO WITH INCONSISTENT PAGE CACHING**
 
 
+## Updates
+**I was able to fix the bug above, the database now successfully returns all the data inserted. How did I fix it?**
+- When the b-tree was being split to accomodate more records the table metadata was updated but the table itself was using the stale root page.
+- Incorrect search Routing led to searching only when the key equal the serparator key, so I corrected the logic to only search when the key is less than the separator key.
+
+
 ## Architecture Overview
 
 1. **Pager**: Reads and writes pages to disk, maintains in-memory cache.
