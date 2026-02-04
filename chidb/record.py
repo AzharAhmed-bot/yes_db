@@ -10,6 +10,7 @@ from chidb.util import (
     pack_uint32, unpack_uint32,
     pack_varint, unpack_varint
 )
+from chidb.security import validate_record_size, ResourceLimitError
 
 
 class DataType(IntEnum):
@@ -45,9 +46,12 @@ class Record:
     def encode(self) -> bytes:
         """
         Encode the record to binary format.
-        
+
         Returns:
             Binary representation of the record
+
+        Raises:
+            ResourceLimitError: If record exceeds size limit
         """
         num_columns = len(self.values)
         
@@ -74,8 +78,14 @@ class Record:
             data_parts.append(encoded_value)
         
         data = b''.join(data_parts)
-        
-        return header_with_size + data
+
+        # Combine header and data
+        result = header_with_size + data
+
+        # Validate record size
+        validate_record_size(len(result))
+
+        return result
     
     def _get_type_code(self, value: Any) -> int:
         """Get the type code for a value."""

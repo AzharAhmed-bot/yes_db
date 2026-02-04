@@ -15,6 +15,16 @@ from chidb.sql.parser import Parser, CreateTableStatement, UpdateStatement, Dele
 from chidb.sql.optimizer import Optimizer
 from chidb.sql.codegen import CodeGenerator
 from chidb.log import get_logger
+from chidb.security import (
+    validate_database_path,
+    validate_sql_length,
+    validate_table_name,
+    validate_column_name,
+    check_table_count,
+    check_column_count,
+    sanitize_error_message,
+    SecurityError
+)
 
 
 # System catalog constants
@@ -83,15 +93,21 @@ class YesDB:
             db.execute('SELECT * FROM users')
     """
     
-    def __init__(self, filename: str):
+    def __init__(self, filename: str, debug_mode: bool = False):
         """
         Open or create a database.
-        
+
         Args:
             filename: Path to the database file
+            debug_mode: Enable debug mode with verbose errors (default: False)
+
+        Raises:
+            SecurityError: If path validation fails
         """
-        self.filename = filename
-        self.pager = Pager(filename)
+        # Validate and sanitize the file path
+        self.filename = validate_database_path(filename)
+        self.debug_mode = debug_mode
+        self.pager = Pager(self.filename)
         self.dbm = DatabaseMachine(self.pager)
         self.codegen = CodeGenerator()
         self.optimizer = Optimizer()
@@ -171,14 +187,20 @@ class YesDB:
     def execute(self, sql: str) -> List[List[Any]]:
         """
         Execute a SQL statement.
-        
+
         Args:
             sql: SQL statement to execute
-            
+
         Returns:
             List of result rows (for SELECT), empty list otherwise
+
+        Raises:
+            SecurityError: If security validation fails
+            ValueError: If SQL is invalid
         """
         try:
+            # Validate SQL length to prevent resource exhaustion
+            validate_sql_length(sql)
             # Lexical analysis
             lexer = Lexer(sql)
             tokens = lexer.tokenize()
@@ -243,19 +265,36 @@ class YesDB:
                 self.dbm.btrees.clear()
 
             return results
-        
+
+        except SecurityError:
+            # Re-raise security errors as-is
+            raise
         except Exception as e:
+            # Sanitize error message in production mode
             self.logger.error(f"Error executing SQL: {e}")
+            if not self.debug_mode:
+                # Provide sanitized error message
+                safe_message = sanitize_error_message(e, self.debug_mode)
+                raise type(e)(safe_message) from None
             raise
     
     def _execute_create_table(self, stmt: CreateTableStatement) -> List[List[Any]]:
         """
         Execute CREATE TABLE statement.
-        
+
         This creates a new B-tree for the table.
         """
         table_name = stmt.table
-        
+
+        # Security validations
+        check_table_count(len(self.tables))
+        validate_table_name(table_name)
+        check_column_count(len(stmt.columns))
+
+        # Validate all column names
+        for col in stmt.columns:
+            validate_column_name(col.name)
+
         if table_name in self.tables:
             raise ValueError(f"Table '{table_name}' already exists")
         
