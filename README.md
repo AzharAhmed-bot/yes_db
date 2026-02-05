@@ -2,6 +2,7 @@
 
 A lightweight relational database built from scratch in Python with SQL support and B-tree storage.
 
+
 ## Installation
 
 ```bash
@@ -21,7 +22,6 @@ YesDB> CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER);
 YesDB> INSERT INTO users VALUES (NULL, 'Alice', 30);
 YesDB> INSERT INTO users VALUES (NULL, 'Bob', 25);
 YesDB> SELECT * FROM users;
-YesDB> SELECT * FROM users WHERE age > 26;
 ```
 
 ### Using as a Library
@@ -77,12 +77,7 @@ with YesDB('myapp.db') as db:
 
 ```sql
 -- Create table
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    name TEXT,
-    email TEXT,
-    age INTEGER
-)
+CREATE TABLE users (id INTEGER PRIMARY KEY,name TEXT,email TEXT,age INTEGER)
 
 -- Insert data
 INSERT INTO users VALUES (NULL, 'Alice', 'alice@example.com', 30)
@@ -163,13 +158,7 @@ from chidb import YesDB
 db = YesDB('my_database.db')
 
 # Create table
-db.execute('''
-    CREATE TABLE users (
-        id INTEGER PRIMARY KEY,
-        username TEXT,
-        created_at INTEGER
-    )
-''')
+db.execute('CREATE TABLE users (id INTEGER PRIMARY KEY,username TEXT,created_at INTEGER)')
 
 # Insert data
 import time
@@ -194,13 +183,7 @@ class UserDatabase:
         self._init_schema()
 
     def _init_schema(self):
-        self.db.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY,
-                username TEXT,
-                email TEXT
-            )
-        ''')
+        self.db.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY,username TEXT,email TEXT)')
 
     def add_user(self, username, email):
         self.db.execute(f"INSERT INTO users VALUES (NULL, '{username}', '{email}')")
