@@ -1,0 +1,94 @@
+================================
+HOW TO PUBLISH YESDB TO PyPI
+================================
+
+BEFORE PUBLISHING - UPDATE YOUR INFO:
+-------------------------------------
+1. Edit pyproject.toml (line 11): Change email to yours
+2. Edit README.md (Links section): Update GitHub URLs
+3. Edit SECURITY.md: Update contact email
+
+STEP 1: CREATE PYPI ACCOUNT
+----------------------------
+Go to: https://pypi.org/account/register/
+- Create account
+- Verify email
+- Enable 2FA
+
+STEP 2: GET API TOKEN
+----------------------
+Go to: https://pypi.org/manage/account/#api-tokens
+- Click "Add API token"
+- Name: yesdb-upload
+- Scope: Entire account
+- Copy the token (starts with pypi-...)
+- Save it somewhere safe!
+
+STEP 3: UPLOAD TO PYPI
+-----------------------
+In terminal, run:
+
+  twine upload dist/*
+
+When prompted:
+- Username: __token__
+- Password: paste your token here
+
+STEP 4: DONE!
+-------------
+Your package is live at: https://pypi.org/project/yesdb/
+
+Anyone can now install it with:
+  pip install yesdb
+
+================================
+OPTIONAL: TEST FIRST
+================================
+
+Test on Test PyPI before publishing to real PyPI:
+
+1. Create account at: https://test.pypi.org/account/register/
+2. Get token from: https://test.pypi.org/manage/account/#api-tokens
+3. Upload:
+   twine upload --repository-url https://test.pypi.org/legacy/ dist/*
+4. Test install:
+   pip install --index-url https://test.pypi.org/simple/ yesdb
+
+================================
+UPDATING YOUR PACKAGE
+================================
+
+When releasing v0.1.1:
+
+1. Update version in:
+   - pyproject.toml: version = "0.1.1"
+   - chidb/__init__.py: __version__ = '0.1.1'
+
+2. Rebuild:
+   rm -rf dist/ build/ *.egg-info/
+   python -m build
+   twine check dist/*
+
+3. Upload:
+   twine upload dist/*
+
+================================
+TROUBLESHOOTING
+================================
+
+Problem: "File already exists"
+Solution: You can't re-upload same version. Change version number.
+
+Problem: "Invalid authentication"
+Solution: Regenerate token on PyPI. Use __token__ as username.
+
+Problem: CLI not working after install
+Solution: Check [project.scripts] in pyproject.toml
+
+================================
+NEED HELP?
+================================
+
+Check the README.md for more details or create an issue on GitHub.
+
+Your package is ready to publish! Good luck! 🚀

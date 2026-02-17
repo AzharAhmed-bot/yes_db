@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-DOMAIN="yesdb.eastus.cloudapp.azure.com"  # Change to your actual DNS
+DOMAIN="yesdb.centralindia.cloudapp.azure.com"  # Change to your actual DNS
 REPO_URL="https://github.com/AzharAhmed-bot/yesdb.git"
 
 echo "=== YesDB Cloud Setup ==="

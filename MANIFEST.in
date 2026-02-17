@@ -1,0 +1,20 @@
+# Include important files in source distribution
+include README.md
+include LICENSE
+include SECURITY.md
+include pyproject.toml
+include setup.py
+
+# Include tests
+recursive-include tests *.py
+
+# Exclude unnecessary files
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude __pycache__
+global-exclude *.so
+global-exclude .DS_Store
+global-exclude *.db
+global-exclude *.cdb
+global-exclude *.sqlite
+global-exclude *.sqlite3
