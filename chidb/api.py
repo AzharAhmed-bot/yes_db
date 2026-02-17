@@ -638,14 +638,35 @@ class YesDB:
         return False
 
 
-def connect(filename: str) -> YesDB:
+def connect(filename: str = None, db_name: str = None, api_key: str = None, server_url: str = None):
     """
-    Connect to a database (convenience function).
-    
+    Connect to a database — locally or in the cloud.
+
+    Local mode (existing behavior):
+        db = connect("my.db")
+
+    Cloud mode:
+        db = connect("myproject")           # auto-loads credentials
+        db = connect(db_name="myproject")   # explicit
+        db = connect(db_name="myproject", api_key="yesdb_...")
+
     Args:
-        filename: Path to the database file
-        
+        filename: Path to a local database file.
+        db_name: Name of a cloud database.
+        api_key: API key for cloud auth (optional, loaded from ~/.yesdb/ if omitted).
+        server_url: Cloud server URL (optional, loaded from ~/.yesdb/ if omitted).
+
     Returns:
-        ChiDB instance
+        YesDB instance (local) or CloudConnection instance (cloud).
     """
-    return YesDB(filename)
+    if filename and db_name:
+        raise ValueError("Specify either filename (local) or db_name (cloud), not both.")
+
+    if filename:
+        return YesDB(filename)
+
+    if db_name:
+        from chidb.client import CloudConnection
+        return CloudConnection(db_name, api_key=api_key, server_url=server_url)
+
+    raise ValueError("Must specify either filename (local) or db_name (cloud).")

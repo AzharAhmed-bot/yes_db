@@ -1,0 +1,17 @@
+[Unit]
+Description=YesDB Cloud API Server
+After=network.target
+
+[Service]
+Type=simple
+User=yesdb
+Group=yesdb
+WorkingDirectory=/opt/yesdb/yes_db
+Environment=YESDB_DATA_DIR=/var/lib/yesdb/data
+Environment=YESDB_ACCOUNTS_DB=/var/lib/yesdb/accounts.db
+ExecStart=/opt/yesdb/venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
