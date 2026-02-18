@@ -1,66 +1,147 @@
 # YesDB
 
-A lightweight relational database built from scratch in Python with SQL support and B-tree storage.
-
+A lightweight relational database built from scratch in Python with SQL support, B-tree storage, and a cloud Backend-as-a-Service for students.
 
 ## Installation
 
 ```bash
+# Local only
 pip install yesdb
+
+# With cloud support
+pip install yesdb[cloud]
 ```
 
 ## Quick Start
 
-### Using the CLI
+### Local Mode
+
+```python
+from yesdb import connect
+
+db = connect("myapp.db")
+db.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
+db.execute("INSERT INTO users VALUES (NULL, 'Alice', 30)")
+results = db.execute("SELECT * FROM users")
+for row in results:
+    print(row)
+db.close()
+```
+
+### Cloud Mode
+
+YesDB Cloud lets you host your database on a remote server. Perfect for student projects that need a real backend.
+
+#### 1. Sign up and create a database
 
 ```bash
-yesdb mydatabase.db
+yesdb signup
+# Email: student@uni.edu
+# Password: ********
+# -> Account created! Logged in.
+
+yesdb init myproject
+# -> Created yesdb/ folder with schema.py
+# -> Database "myproject" created on cloud.
+```
+
+#### 2. Define your schema
+
+After running `yesdb init`, you'll have a `yesdb/schema.py` file in your project. Edit it:
+
+```python
+# yesdb/schema.py
+from yesdb import Table, Column, Integer, Text, Real
+
+users = Table("users", [
+    Column("id", Integer, primary_key=True),
+    Column("name", Text),
+    Column("email", Text),
+])
+
+products = Table("products", [
+    Column("id", Integer, primary_key=True),
+    Column("name", Text),
+    Column("price", Real),
+])
+```
+
+#### 3. Push your schema to the cloud
+
+```bash
+yesdb push
+# -> Connecting to myproject database...
+# -> Table "users" created
+# -> Table "products" created
+# -> Schema synced. 2 tables pushed.
+```
+
+#### 4. Use in your code
+
+```python
+from yesdb import connect
+
+db = connect("myproject")  # uses saved credentials automatically
+
+db.execute("INSERT INTO users VALUES (NULL, 'Alice', 'alice@uni.edu')")
+db.execute("INSERT INTO users VALUES (NULL, 'Bob', 'bob@uni.edu')")
+
+rows = db.execute("SELECT * FROM users")
+for row in rows:
+    print(row)
+```
+
+Every response includes the database engine's internal logs (B-tree operations, SQL parsing, page allocations), so you can see exactly what's happening under the hood.
+
+#### 5. Use with FastAPI or Flask
+
+```python
+# main.py
+from fastapi import FastAPI
+from yesdb import connect
+
+app = FastAPI()
+db = connect("myproject")
+
+@app.get("/users")
+def get_users():
+    rows = db.execute("SELECT * FROM users")
+    return {"users": [list(row) for row in rows]}
+
+@app.post("/users")
+def create_user(name: str, email: str):
+    db.execute(f"INSERT INTO users VALUES (NULL, '{name}', '{email}')")
+    return {"status": "created"}
+```
+
+### CLI Commands
+
+```bash
+yesdb signup              # Create an account
+yesdb login               # Login to existing account
+yesdb init <db_name>      # Initialize a project with a cloud database
+yesdb push                # Push schema.py to the cloud
+yesdb databases           # List your databases
+yesdb shell <db_name>     # Interactive SQL shell against a cloud database
+```
+
+### Local CLI Shell
+
+```bash
+yesdb-local mydatabase.db
 ```
 
 ```sql
 YesDB> CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER);
 YesDB> INSERT INTO users VALUES (NULL, 'Alice', 30);
-YesDB> INSERT INTO users VALUES (NULL, 'Bob', 25);
 YesDB> SELECT * FROM users;
 ```
 
-### Using as a Library
-
-```python
-from chidb import YesDB
-
-# Create/open database
-db = YesDB('myapp.db')
-
-# Create table
-db.execute('CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, price REAL)')
-
-# Insert data
-db.execute("INSERT INTO products VALUES (NULL, 'Laptop', 999.99)")
-db.execute("INSERT INTO products VALUES (NULL, 'Mouse', 29.99)")
-
-# Query data
-results = db.execute('SELECT * FROM products WHERE price < 100')
-for row in results:
-    print(row)
-
-# Update & delete
-db.execute("UPDATE products SET price = 899.99 WHERE name = 'Laptop'")
-db.execute("DELETE FROM products WHERE price < 30")
-
-# Close
-db.close()
 ```
-
-### Context Manager
-
-```python
-from chidb import YesDB
-
-with YesDB('myapp.db') as db:
-    db.execute('CREATE TABLE tasks (id INTEGER PRIMARY KEY, title TEXT)')
-    db.execute("INSERT INTO tasks VALUES (NULL, 'Learn SQL')")
-    results = db.execute('SELECT * FROM tasks')
+.help          Show help
+.tables        List all tables
+.schema        Show table schemas
+.exit          Exit shell
 ```
 
 ## Features
@@ -69,15 +150,18 @@ with YesDB('myapp.db') as db:
 - **Data Types**: INTEGER, TEXT, REAL, BLOB
 - **Query Features**: WHERE, ORDER BY, LIMIT, OFFSET, DISTINCT
 - **B-Tree Storage**: Efficient indexing and data retrieval
-- **No Dependencies**: Pure Python implementation
-- **Interactive Shell**: Built-in SQL shell
+- **No Dependencies**: Pure Python implementation (local mode)
+- **Cloud BaaS**: Host your database remotely with a single command
+- **Schema DSL**: Define tables in Python, push to cloud
+- **Engine Logs**: See B-tree splits, page allocations, and SQL parsing in every response
+- **Interactive Shell**: Built-in SQL shell (local and cloud)
 - **Auto-increment**: PRIMARY KEY auto-increment support
 
 ## SQL Examples
 
 ```sql
 -- Create table
-CREATE TABLE users (id INTEGER PRIMARY KEY,name TEXT,email TEXT,age INTEGER)
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, age INTEGER)
 
 -- Insert data
 INSERT INTO users VALUES (NULL, 'Alice', 'alice@example.com', 30)
@@ -102,155 +186,50 @@ ALTER TABLE users ADD COLUMN country TEXT
 DROP TABLE users
 ```
 
-## Shell Commands
+## How Cloud Mode Works
 
 ```
-.help          Show help
-.tables        List all tables
-.schema        Show table schemas
-.exit          Exit shell (.quit also works)
+Your machine                   YesDB Cloud Server
+────────────────               ──────────────────
+yesdb CLI (signup/login/push)   ┌─────────────────┐
+   <-> HTTPS                    │ nginx (SSL)      │
+yesdb SDK (connect/execute)     │  └─ FastAPI      │
+                                │     ├─ auth      │
+                                │     └─ data/     │
+                                │       ├─ user1/  │
+                                │       │  └─ *.db │
+                                │       └─ user2/  │
+                                │          └─ *.db │
+                                └─────────────────┘
 ```
 
-## Setup Guide
+- Each user gets their own isolated account with multiple databases
+- All traffic is encrypted over HTTPS
+- Authentication via API key (generated at signup, saved locally)
+- Database engine logs are returned with every query for full transparency
 
-### 1. Install YesDB
+## Security
 
-```bash
-pip install yesdb
-```
-
-### 2. Verify Installation
-
-```bash
-# Check CLI works
-yesdb --help
-
-# Test Python import
-python -c "from chidb import YesDB; print('YesDB installed successfully!')"
-```
-
-### 3. Create Your First Database
-
-**Option A: Using CLI**
-
-```bash
-# Start the shell
-yesdb my_database.db
-
-# You'll see:
-# YesDB version 0.1.0
-# Enter ".help" for usage hints
-# YesDB>
-
-# Try some commands:
-CREATE TABLE test (id INTEGER PRIMARY KEY, message TEXT);
-INSERT INTO test VALUES (NULL, 'Hello World');
-SELECT * FROM test;
-.exit
-```
-
-**Option B: Using Python**
-
-```python
-from chidb import YesDB
-
-# Create database
-db = YesDB('my_database.db')
-
-# Create table
-db.execute('CREATE TABLE users (id INTEGER PRIMARY KEY,username TEXT,created_at INTEGER)')
-
-# Insert data
-import time
-db.execute(f"INSERT INTO users VALUES (NULL, 'admin', {int(time.time())})")
-
-# Query
-users = db.execute('SELECT * FROM users')
-print(f"Found {len(users)} users")
-
-db.close()
-```
-
-### 4. Working with Your Application
-
-```python
-# app.py
-from chidb import YesDB
-
-class UserDatabase:
-    def __init__(self, db_path='users.db'):
-        self.db = YesDB(db_path)
-        self._init_schema()
-
-    def _init_schema(self):
-        self.db.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY,username TEXT,email TEXT)')
-
-    def add_user(self, username, email):
-        self.db.execute(f"INSERT INTO users VALUES (NULL, '{username}', '{email}')")
-
-    def get_user(self, username):
-        results = self.db.execute(f"SELECT * FROM users WHERE username = '{username}'")
-        return results[0] if results else None
-
-    def close(self):
-        self.db.close()
-
-# Usage
-db = UserDatabase()
-db.add_user('alice', 'alice@example.com')
-user = db.get_user('alice')
-db.close()
-```
-
-## Security & Limitations
-
-### Security Features
+### Local Mode
 - Path validation (blocks system file access)
 - Resource limits (SQL length, record size)
 - Input validation (table/column names)
 
-### Important Limitations
-- **Single-user only**: Not designed for concurrent access
-- **No encryption**: Data stored in plaintext
-- **No authentication**: File access = database access
-- **Local only**: Not a client-server database
-
-### Recommended Use Cases
-✅ Single-user desktop applications
-✅ Development and prototyping
-✅ Data analysis scripts
-✅ Educational projects
-✅ Embedded applications
-
-❌ Multi-user web applications
-❌ Concurrent access scenarios
-❌ Sensitive data (without encryption)
-❌ Production systems with high security requirements
-
-### Best Practices
-
-```python
-from chidb import YesDB
-
-# ✅ Good: Use in trusted environments
-db = YesDB('local_data.db')
-
-# ✅ Good: Validate user input
-safe_input = user_input.replace("'", "''")
-db.execute(f"INSERT INTO logs VALUES (NULL, '{safe_input}')")
-
-# ❌ Avoid: Don't use with untrusted file paths
-# ❌ Avoid: Don't store passwords in plaintext
-```
+### Cloud Mode
+- HTTPS encryption (TLS via Let's Encrypt)
+- API key authentication (SHA-256 hashed, never stored in plaintext)
+- Password hashing (bcrypt)
+- Per-user data isolation
+- Request size limits
 
 ## Development
 
 ### Install from Source
 
 ```bash
-git clone https://github.com/AzharAhmed-bot/yes_db.git
-cd yesdb
-pip install -e .
+git clone https://github.com/AzharAhmed-bot/yesdb.git
+cd yes_db
+pip install -e ".[cloud]"
 ```
 
 ### Run Tests
@@ -263,15 +242,12 @@ pytest
 ## Requirements
 
 - Python 3.8+
-- No external dependencies
+- No external dependencies (local mode)
+- `requests` (cloud mode, installed with `pip install yesdb[cloud]`)
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) file
-
-## Contributing
-
-Contributions welcome! This is an educational project focused on learning database internals.
 
 ## Links
 
@@ -281,8 +257,14 @@ Contributions welcome! This is an educational project focused on learning databa
 
 ## Version
 
-Current version: **0.1.1**
+Current version: **0.1.5**
+
+### Changelog
+
+#### v0.1.5 (bug fixes)
+- **Fix**: `from yesdb import connect` now works correctly. A `yesdb` compatibility package is included so the import matches the PyPI package name.
+- **Fix**: `Table.to_sql()` now emits the `PRIMARY KEY` constraint in the generated `CREATE TABLE` SQL, so auto-increment works as expected when inserting `NULL` into a primary key column.
 
 ---
 
-**Note**: YesDB is an educational database. For production systems, consider using SQLite, PostgreSQL, or MySQL.
+**Note**: YesDB is an educational database built from scratch to teach database internals. For production systems, consider SQLite, PostgreSQL, or MySQL.
