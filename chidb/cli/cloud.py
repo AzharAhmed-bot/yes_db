@@ -242,17 +242,13 @@ def cmd_init(args) -> int:
     if not os.path.exists(schema_path):
         with open(schema_path, "w") as f:
             f.write(
-                '"""\n'
-                f"Database schema for '{db_name}'.\n"
-                "Define your tables here, then run 'yesdb push' to sync to the cloud.\n"
-                '"""\n\n'
-                "from chidb.schema import Table, Column, Integer, Text, Real, Blob\n\n"
-                "# Example:\n"
-                "# users = Table('users', [\n"
-                "#     Column('id', Integer, primary_key=True),\n"
-                "#     Column('name', Text),\n"
-                "#     Column('email', Text),\n"
-                "# ])\n"
+                "from yesdb import Table, Column, Integer, Text, Real, Blob\n\n"
+                f"# Schema for '{db_name}'. Add your tables below, then run 'yesdb push'.\n\n"
+                "users = Table('users', [\n"
+                "    Column('id', Integer, primary_key=True),\n"
+                "    Column('name', Text),\n"
+                "    Column('email', Text),\n"
+                "])\n"
             )
 
     print(f"  Created yesdb/ folder with schema.py")
