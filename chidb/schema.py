@@ -5,7 +5,7 @@ Students define their database tables in a schema.py file using this DSL,
 then run `yesdb push` to sync the schema to the cloud.
 
 Example usage:
-    from yesdb.schema import Table, Column, Integer, Text
+    from chidb.schema import Table, Column, Integer, Text
 
     users = Table("users", [
         Column("id", Integer, primary_key=True),
@@ -92,11 +92,14 @@ class Table:
         Generate a CREATE TABLE SQL statement from this table definition.
 
         Returns:
-            SQL string like: CREATE TABLE users (id INTEGER, name TEXT)
+            SQL string like: CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)
         """
         col_defs = []
         for col in self.columns:
-            col_defs.append(f"{col.name} {col.type_}")
+            col_def = f"{col.name} {col.type_}"
+            if col.primary_key:
+                col_def += " PRIMARY KEY"
+            col_defs.append(col_def)
         columns_sql = ", ".join(col_defs)
         return f"CREATE TABLE {self.name} ({columns_sql})"
 
