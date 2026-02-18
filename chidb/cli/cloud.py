@@ -33,7 +33,7 @@ from chidb.client import (
 from chidb.schema import Table, collect_tables
 
 
-DEFAULT_SERVER_URL = "https://yesdb.eastus.cloudapp.azure.com"
+DEFAULT_SERVER_URL = "https://yesdb.centralindia.cloudapp.azure.com"
 PROJECT_CONFIG_FILE = os.path.join("yesdb", ".yesdb.json")
 
 
