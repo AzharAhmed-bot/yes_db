@@ -11,7 +11,7 @@ from chidb.security import SecurityError, PathTraversalError, ResourceLimitError
 from chidb.client import CloudConnection, ExecuteResult
 from chidb.schema import Table, Column, Integer, Text, Real, Float, Blob
 
-__version__ = '0.1.5'
+__version__ = '0.1.6'
 __author__ = 'Azhar'
 __license__ = 'MIT'
 
