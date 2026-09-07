@@ -44,10 +44,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/AzharAhmed-bot/yesdb"  # Update with your repo
-Documentation = "https://github.com/AzharAhmed-bot/yesdb#readme"
-Repository = "https://github.com/AzharAhmed-bot/yesdb"
-Issues = "https://github.com/AzharAhmed-bot/yesdb/issues"
+Homepage = "https://github.com/AzharAhmed-bot/yes_db"
+Documentation = "https://github.com/AzharAhmed-bot/yes_db#readme"
+Repository = "https://github.com/AzharAhmed-bot/yes_db"
+Issues = "https://github.com/AzharAhmed-bot/yes_db/issues"
 
 [project.scripts]
 yesdb = "chidb.cli.cloud:main"
