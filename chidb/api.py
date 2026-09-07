@@ -11,7 +11,7 @@ from chidb.btree import BTree
 from chidb.dbm import DatabaseMachine
 from chidb.record import Record
 from chidb.sql.lexer import Lexer
-from chidb.sql.parser import Parser, CreateTableStatement, UpdateStatement, DeleteStatement, DropTableStatement, AlterTableStatement, ColumnDef, SelectStatement
+from chidb.sql.parser import Parser, CreateTableStatement, UpdateStatement, DeleteStatement, DropTableStatement, AlterTableStatement, ColumnDef, SelectStatement, AggregateCall
 from chidb.sql.optimizer import Optimizer
 from chidb.sql.codegen import CodeGenerator
 from chidb.log import get_logger
@@ -229,6 +229,10 @@ class YesDB:
             if isinstance(ast, AlterTableStatement):
                 return self._execute_alter_table(ast)
             
+            # Handle SELECT with GROUP BY or aggregate functions
+            if isinstance(ast, SelectStatement) and self._is_aggregate_select(ast):
+                return self._execute_select_aggregate(ast)
+
             # Handle SELECT with ORDER BY/LIMIT
             if isinstance(ast, SelectStatement) and (ast.order_by or ast.limit or ast.offset or ast.distinct):
                 return self._execute_select_advanced(ast)
@@ -542,7 +546,139 @@ class YesDB:
             results = results[:stmt.limit]
         
         return results
-    
+
+    def _is_aggregate_select(self, stmt: SelectStatement) -> bool:
+        """Check whether a SELECT statement uses GROUP BY or an aggregate function."""
+        if stmt.group_by:
+            return True
+        return any(isinstance(column, AggregateCall) for column in stmt.columns)
+
+    def _execute_select_aggregate(self, stmt: SelectStatement) -> List[List[Any]]:
+        """
+        Execute SELECT with GROUP BY and/or aggregate functions
+        (COUNT, SUM, AVG, MIN, MAX).
+        """
+        table_name = stmt.table
+        if table_name not in self.tables:
+            raise ValueError(f"Table '{table_name}' does not exist")
+
+        table_meta = self.table_metadata.get(table_name)
+        btree = BTree(self.pager, self.tables[table_name])
+
+        matching_records = [
+            record for _, record in btree.scan()
+            if not stmt.where or self._evaluate_where(record, stmt.where, table_meta)
+        ]
+
+        groups = self._group_records(matching_records, stmt.group_by, table_meta)
+        result_rows = [
+            self._aggregate_group(stmt.columns, key_lookup, group_records, table_meta)
+            for key_lookup, group_records in groups
+        ]
+
+        return self._finalize_aggregate_rows(result_rows, stmt)
+
+    def _group_records(
+        self, records: List['Record'], group_by: Optional[List[str]], table_meta: Optional[TableMetadata]
+    ) -> List[tuple]:
+        """Partition records into groups, returning (key_lookup, records) pairs in first-seen order."""
+        if not group_by:
+            return [({}, records)]
+
+        column_indexes = {name: self._column_index(name, table_meta) for name in group_by}
+        group_records: Dict[tuple, List['Record']] = {}
+        group_order: List[tuple] = []
+
+        for record in records:
+            values = record.get_values()
+            key = tuple(values[column_indexes[name]] for name in group_by)
+            if key not in group_records:
+                group_records[key] = []
+                group_order.append(key)
+            group_records[key].append(record)
+
+        return [
+            (dict(zip(group_by, key)), group_records[key])
+            for key in group_order
+        ]
+
+    def _aggregate_group(
+        self, columns: List[Any], key_lookup: Dict[str, Any],
+        group_records: List['Record'], table_meta: Optional[TableMetadata]
+    ) -> List[Any]:
+        """Build one output row for a group: resolved GROUP BY values and computed aggregates."""
+        row = []
+        for column in columns:
+            if isinstance(column, AggregateCall):
+                row.append(self._compute_aggregate(column, group_records, table_meta))
+            elif column in key_lookup:
+                row.append(key_lookup[column])
+            else:
+                raise ValueError(
+                    f"Column '{column}' must appear in GROUP BY or be an aggregate function"
+                )
+        return row
+
+    def _compute_aggregate(
+        self, call: AggregateCall, records: List['Record'], table_meta: Optional[TableMetadata]
+    ) -> Any:
+        """Compute a single aggregate function's value over a group of records."""
+        if call.function == 'COUNT' and call.column == '*':
+            return len(records)
+
+        column_index = self._column_index(call.column, table_meta)
+        non_null_values = [
+            record.get_values()[column_index]
+            for record in records
+            if record.get_values()[column_index] is not None
+        ]
+
+        if call.function == 'COUNT':
+            return len(non_null_values)
+        if not non_null_values:
+            return None
+        if call.function == 'SUM':
+            return sum(non_null_values)
+        if call.function == 'AVG':
+            return sum(non_null_values) / len(non_null_values)
+        if call.function == 'MIN':
+            return min(non_null_values)
+        if call.function == 'MAX':
+            return max(non_null_values)
+
+        raise ValueError(f"Unsupported aggregate function: {call.function}")
+
+    def _column_index(self, name: str, table_meta: Optional[TableMetadata]) -> int:
+        """Find a column's position in the table schema."""
+        if not table_meta:
+            raise ValueError(f"No metadata for column '{name}'")
+        for index, col_def in enumerate(table_meta.columns):
+            if col_def.name == name:
+                return index
+        raise ValueError(f"Unknown column: {name}")
+
+    def _finalize_aggregate_rows(self, rows: List[List[Any]], stmt: SelectStatement) -> List[List[Any]]:
+        """Apply ORDER BY/OFFSET/LIMIT to aggregated rows and wrap them as Records."""
+        if stmt.order_by:
+            rows = self._sort_aggregate_rows(rows, stmt.columns, stmt.order_by)
+        if stmt.offset:
+            rows = rows[stmt.offset:]
+        if stmt.limit:
+            rows = rows[:stmt.limit]
+
+        return [[Record(row)] for row in rows]
+
+    def _sort_aggregate_rows(
+        self, rows: List[List[Any]], columns: List[Any], order_by: List[tuple]
+    ) -> List[List[Any]]:
+        """Sort aggregated rows by GROUP BY column position (aggregate aliases are not supported)."""
+        for col_name, direction in reversed(order_by):
+            if col_name not in columns:
+                continue
+            position = columns.index(col_name)
+            rows.sort(key=lambda row: row[position], reverse=(direction == 'DESC'))
+        return rows
+
     def _execute_drop_table(self, stmt: DropTableStatement) -> List[List[Any]]:
         """
         Execute DROP TABLE statement.

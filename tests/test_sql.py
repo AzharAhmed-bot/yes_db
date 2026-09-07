@@ -7,7 +7,7 @@ from chidb.sql.lexer import Lexer, Token, TokenType, tokenize
 from chidb.sql.parser import (
     Parser, parse, ParseError,
     SelectStatement, InsertStatement, CreateTableStatement,
-    BinaryOp, Literal, Identifier, ColumnDef
+    BinaryOp, Literal, Identifier, ColumnDef, AggregateCall
 )
 
 
@@ -79,6 +79,25 @@ class TestKeywords:
         assert tokens[0].type == TokenType.SELECT
         assert tokens[1].type == TokenType.SELECT
         assert tokens[2].type == TokenType.SELECT
+
+    def test_group_keyword(self):
+        tokens = tokenize('GROUP')
+        assert tokens[0].type == TokenType.GROUP
+
+    def test_group_by_sequence(self):
+        tokens = tokenize('GROUP BY')
+        assert tokens[0].type == TokenType.GROUP
+        assert tokens[1].type == TokenType.BY
+
+    def test_aggregate_function_keywords(self):
+        tokens = tokenize('COUNT SUM AVG MIN MAX')
+        assert [t.type for t in tokens[:5]] == [
+            TokenType.COUNT,
+            TokenType.SUM,
+            TokenType.AVG,
+            TokenType.MIN,
+            TokenType.MAX,
+        ]
 
 
 class TestLiterals:
@@ -321,6 +340,73 @@ class TestParserBasics:
         assert ast.where is not None
         assert isinstance(ast.where, BinaryOp)
         assert ast.where.operator == '='
+
+
+class TestParserGroupBy:
+    """Test GROUP BY clause parsing."""
+
+    def test_parse_group_by_single_column(self):
+        ast = parse('SELECT category FROM products GROUP BY category')
+        assert ast.group_by == ['category']
+
+    def test_parse_group_by_multiple_columns(self):
+        ast = parse('SELECT category, region FROM products GROUP BY category, region')
+        assert ast.group_by == ['category', 'region']
+
+    def test_parse_without_group_by_is_none(self):
+        ast = parse('SELECT * FROM products')
+        assert ast.group_by is None
+
+    def test_parse_group_by_with_where(self):
+        ast = parse("SELECT category FROM products WHERE price > 10 GROUP BY category")
+        assert ast.where is not None
+        assert ast.group_by == ['category']
+
+    def test_parse_group_by_with_order_by(self):
+        ast = parse('SELECT category FROM products GROUP BY category ORDER BY category')
+        assert ast.group_by == ['category']
+        assert ast.order_by == [('category', 'ASC')]
+
+
+class TestParserAggregates:
+    """Test aggregate function parsing in SELECT columns."""
+
+    def test_parse_count_star(self):
+        ast = parse('SELECT COUNT(*) FROM products')
+        assert ast.columns == [AggregateCall(function='COUNT', column='*')]
+
+    def test_parse_count_column(self):
+        ast = parse('SELECT COUNT(price) FROM products')
+        assert ast.columns == [AggregateCall(function='COUNT', column='price')]
+
+    def test_parse_sum(self):
+        ast = parse('SELECT SUM(price) FROM products')
+        assert ast.columns == [AggregateCall(function='SUM', column='price')]
+
+    def test_parse_avg(self):
+        ast = parse('SELECT AVG(price) FROM products')
+        assert ast.columns == [AggregateCall(function='AVG', column='price')]
+
+    def test_parse_min(self):
+        ast = parse('SELECT MIN(price) FROM products')
+        assert ast.columns == [AggregateCall(function='MIN', column='price')]
+
+    def test_parse_max(self):
+        ast = parse('SELECT MAX(price) FROM products')
+        assert ast.columns == [AggregateCall(function='MAX', column='price')]
+
+    def test_parse_group_by_with_aggregate(self):
+        ast = parse('SELECT category, COUNT(*) FROM products GROUP BY category')
+        assert ast.columns == ['category', AggregateCall(function='COUNT', column='*')]
+        assert ast.group_by == ['category']
+
+    def test_parse_multiple_aggregates(self):
+        ast = parse('SELECT category, SUM(price), AVG(price) FROM products GROUP BY category')
+        assert ast.columns == [
+            'category',
+            AggregateCall(function='SUM', column='price'),
+            AggregateCall(function='AVG', column='price'),
+        ]
 
 
 class TestParserInsert:

@@ -278,3 +278,84 @@ class TestComplexQueries:
             
             results = db.execute('SELECT * FROM mixed')
             assert len(results) == 2
+
+
+def _row_values(results):
+    return [row[0].get_values() for row in results]
+
+
+class TestAggregates:
+    """Test GROUP BY and aggregate functions (COUNT, SUM, AVG, MIN, MAX)."""
+
+    @pytest.fixture
+    def products_db(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE products (id INTEGER PRIMARY KEY, category TEXT, price INTEGER)')
+            db.execute("INSERT INTO products VALUES (NULL, 'fruit', 10)")
+            db.execute("INSERT INTO products VALUES (NULL, 'fruit', 20)")
+            db.execute("INSERT INTO products VALUES (NULL, 'veg', 5)")
+            yield db
+
+    def test_count_star_whole_table(self, products_db):
+        results = products_db.execute('SELECT COUNT(*) FROM products')
+        assert _row_values(results) == [[3]]
+
+    def test_count_column(self, products_db):
+        results = products_db.execute('SELECT COUNT(price) FROM products')
+        assert _row_values(results) == [[3]]
+
+    def test_sum(self, products_db):
+        results = products_db.execute('SELECT SUM(price) FROM products')
+        assert _row_values(results) == [[35]]
+
+    def test_avg(self, products_db):
+        results = products_db.execute('SELECT AVG(price) FROM products')
+        assert _row_values(results)[0] == pytest.approx([35 / 3])
+
+    def test_min_and_max(self, products_db):
+        results = products_db.execute('SELECT MIN(price), MAX(price) FROM products')
+        assert _row_values(results) == [[5, 20]]
+
+    def test_group_by_single_column(self, products_db):
+        results = products_db.execute(
+            'SELECT category, COUNT(*) FROM products GROUP BY category ORDER BY category'
+        )
+        assert _row_values(results) == [['fruit', 2], ['veg', 1]]
+
+    def test_group_by_with_multiple_aggregates(self, products_db):
+        results = products_db.execute(
+            'SELECT category, SUM(price), AVG(price) FROM products '
+            'GROUP BY category ORDER BY category'
+        )
+        assert _row_values(results) == [
+            ['fruit', 30, 15.0],
+            ['veg', 5, 5.0],
+        ]
+
+    def test_group_by_with_where(self, products_db):
+        results = products_db.execute(
+            "SELECT category, SUM(price) FROM products WHERE price > 5 GROUP BY category"
+        )
+        assert _row_values(results) == [['fruit', 30]]
+
+    def test_group_by_with_limit(self, products_db):
+        results = products_db.execute(
+            'SELECT category, COUNT(*) FROM products GROUP BY category ORDER BY category LIMIT 1'
+        )
+        assert _row_values(results) == [['fruit', 2]]
+
+    def test_count_on_empty_table(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE empty_table (id INTEGER)')
+            results = db.execute('SELECT COUNT(*) FROM empty_table')
+            assert _row_values(results) == [[0]]
+
+    def test_sum_of_empty_table_is_null(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE empty_table (id INTEGER)')
+            results = db.execute('SELECT SUM(id) FROM empty_table')
+            assert _row_values(results) == [[None]]
+
+    def test_ungrouped_plain_column_raises(self, products_db):
+        with pytest.raises(ValueError):
+            products_db.execute('SELECT category, price FROM products GROUP BY category')

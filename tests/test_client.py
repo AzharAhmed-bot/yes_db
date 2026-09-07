@@ -267,16 +267,11 @@ class TestCloudConnectionIntegration:
         auth_module._accounts_db = None
 
         import server.main as main_module
-        main_module._db_pool.clear()
+        main_module._pool.clear()
 
         yield
 
-        for db in main_module._db_pool.values():
-            try:
-                db.close()
-            except Exception:
-                pass
-        main_module._db_pool.clear()
+        main_module._pool.close_all()
         auth_module.close_accounts_db()
 
     @pytest.fixture

@@ -49,3 +49,14 @@ class TestSettings:
         from server.config import Settings
         s = Settings()
         assert s.PORT == 9090
+
+    def test_default_query_timeout(self):
+        from server.config import Settings
+        s = Settings()
+        assert s.QUERY_TIMEOUT_SECONDS == 10.0
+
+    def test_env_override_query_timeout(self, monkeypatch):
+        monkeypatch.setenv("YESDB_QUERY_TIMEOUT_SECONDS", "30")
+        from server.config import Settings
+        s = Settings()
+        assert s.QUERY_TIMEOUT_SECONDS == 30.0

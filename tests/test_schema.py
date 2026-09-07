@@ -118,7 +118,7 @@ class TestToSql:
             ],
         )
         sql = t.to_sql()
-        assert sql == "CREATE TABLE users (id INTEGER, name TEXT, email TEXT)"
+        assert sql == "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)"
 
     def test_all_types(self):
         t = Table(

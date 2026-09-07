@@ -24,7 +24,7 @@ def fresh_server(tmp_path, monkeypatch):
     auth_module._accounts_db = None
 
     import server.main as main_module
-    main_module._db_pool.clear()
+    main_module._pool.clear()
 
     # Use tmp_path for credentials
     cred_path = str(tmp_path / ".yesdb" / "credentials.json")
@@ -38,12 +38,7 @@ def fresh_server(tmp_path, monkeypatch):
 
     yield tmp_path
 
-    for db in main_module._db_pool.values():
-        try:
-            db.close()
-        except Exception:
-            pass
-    main_module._db_pool.clear()
+    main_module._pool.close_all()
     auth_module.close_accounts_db()
 
 
@@ -286,7 +281,11 @@ class TestPush:
         with patch("chidb.cli.cloud.requests", mock_req):
             main(["init", "emptydb"])
 
-        # schema.py has no tables (just the template comments)
+        # Overwrite the generated template (which now includes an example
+        # table) with a schema that defines no tables at all.
+        with open(os.path.join("yesdb", "schema.py"), "w") as f:
+            f.write("from yesdb import Table, Column, Integer, Text, Real, Blob\n")
+
         with patch("chidb.cli.cloud.requests", mock_req):
             result = main(["push"])
 

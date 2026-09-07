@@ -32,6 +32,7 @@ class TokenType(Enum):
     PRIMARY = auto()
     KEY = auto()
     ORDER = auto()
+    GROUP = auto()
     BY = auto()
     ASC = auto()
     DESC = auto()
@@ -115,6 +116,7 @@ KEYWORDS = {
     'PRIMARY': TokenType.PRIMARY,
     'KEY': TokenType.KEY,
     'ORDER': TokenType.ORDER,
+    'GROUP': TokenType.GROUP,
     'BY': TokenType.BY,
     'ASC': TokenType.ASC,
     'DESC': TokenType.DESC,

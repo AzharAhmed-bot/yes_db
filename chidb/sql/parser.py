@@ -19,16 +19,17 @@ class ASTNode:
 @dataclass
 class SelectStatement(ASTNode):
     """SELECT statement AST node."""
-    columns: List[str]  # Column names or '*'
+    columns: List[Any]  # Column names ('*', str) or AggregateCall entries
     table: str
     where: Optional['Expression'] = None
+    group_by: Optional[List[str]] = None
     order_by: Optional[List[tuple]] = None  # List of (column_name, direction) tuples
     limit: Optional[int] = None
     offset: Optional[int] = None
     distinct: bool = False
-    
+
     def __repr__(self) -> str:
-        return f"SelectStatement(columns={self.columns}, table={self.table}, where={self.where}, order_by={self.order_by}, limit={self.limit})"
+        return f"SelectStatement(columns={self.columns}, table={self.table}, where={self.where}, group_by={self.group_by}, order_by={self.order_by}, limit={self.limit})"
 
 
 @dataclass
@@ -133,9 +134,28 @@ class Literal(Expression):
 class Identifier(Expression):
     """Identifier (column name, table name)."""
     name: str
-    
+
     def __repr__(self) -> str:
         return f"Identifier({self.name})"
+
+
+@dataclass
+class AggregateCall(Expression):
+    """Aggregate function call in a SELECT column list, e.g. COUNT(*), SUM(price)."""
+    function: str  # 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX'
+    column: str    # column name, or '*' for COUNT(*)
+
+    def __repr__(self) -> str:
+        return f"AggregateCall({self.function}({self.column}))"
+
+
+AGGREGATE_TOKENS = {
+    TokenType.COUNT: 'COUNT',
+    TokenType.SUM: 'SUM',
+    TokenType.AVG: 'AVG',
+    TokenType.MIN: 'MIN',
+    TokenType.MAX: 'MAX',
+}
 
 
 class ParseError(Exception):
@@ -239,22 +259,33 @@ class Parser:
             columns.append('*')
             self.advance()
         else:
-            columns.append(self.expect(TokenType.IDENTIFIER).value)
-            
+            columns.append(self.parse_select_column())
+
             while self.match(TokenType.COMMA):
                 self.advance()
-                columns.append(self.expect(TokenType.IDENTIFIER).value)
-        
+                columns.append(self.parse_select_column())
+
         # FROM clause
         self.expect(TokenType.FROM)
         table = self.expect(TokenType.IDENTIFIER).value
-        
+
         # Optional WHERE clause
         where = None
         if self.match(TokenType.WHERE):
             self.advance()
             where = self.parse_expression()
-        
+
+        # Optional GROUP BY clause
+        group_by = None
+        if self.match(TokenType.GROUP):
+            self.advance()
+            self.expect(TokenType.BY)
+
+            group_by = [self.expect(TokenType.IDENTIFIER).value]
+            while self.match(TokenType.COMMA):
+                self.advance()
+                group_by.append(self.expect(TokenType.IDENTIFIER).value)
+
         # Optional ORDER BY clause
         order_by = None
         if self.match(TokenType.ORDER):
@@ -303,14 +334,41 @@ class Parser:
             offset = self.expect(TokenType.INTEGER_LITERAL).value
         
         return SelectStatement(
-            columns=columns, 
-            table=table, 
+            columns=columns,
+            table=table,
             where=where,
+            group_by=group_by,
             order_by=order_by,
             limit=limit,
             offset=offset,
             distinct=distinct
         )
+
+    def parse_select_column(self) -> Any:
+        """Parse a single SELECT column: a plain identifier or an aggregate call."""
+        if self.current_token and self.current_token.type in AGGREGATE_TOKENS:
+            return self.parse_aggregate_call()
+        return self.expect(TokenType.IDENTIFIER).value
+
+    def parse_aggregate_call(self) -> AggregateCall:
+        """
+        Parse an aggregate function call.
+
+        Grammar:
+        (COUNT | SUM | AVG | MIN | MAX) ( * | column )
+        """
+        function = AGGREGATE_TOKENS[self.current_token.type]
+        self.advance()
+
+        self.expect(TokenType.LPAREN)
+        if self.match(TokenType.STAR):
+            column = '*'
+            self.advance()
+        else:
+            column = self.expect(TokenType.IDENTIFIER).value
+        self.expect(TokenType.RPAREN)
+
+        return AggregateCall(function=function, column=column)
     
     def parse_insert(self) -> InsertStatement:
         """

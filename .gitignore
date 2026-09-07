@@ -75,3 +75,4 @@ app/.output/
 
 # Claude Code
 .claude/
+CLAUDE.md

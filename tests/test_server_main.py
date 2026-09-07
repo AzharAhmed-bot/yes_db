@@ -22,17 +22,12 @@ def fresh_server(tmp_path, monkeypatch):
 
     # Reset db pool
     import server.main as main_module
-    main_module._db_pool.clear()
+    main_module._pool.clear()
 
     yield
 
     # Cleanup
-    for db in main_module._db_pool.values():
-        try:
-            db.close()
-        except Exception:
-            pass
-    main_module._db_pool.clear()
+    main_module._pool.close_all()
     auth_module.close_accounts_db()
 
 
@@ -389,6 +384,81 @@ class TestListTables:
             headers=auth_headers,
         )
         assert "users" in resp.json()["tables"]
+
+
+# ── Concurrency ──────────────────────────────────────────────────
+
+
+class TestConcurrency:
+    def test_concurrent_inserts_do_not_lose_writes(self, client, auth_headers, test_db):
+        import threading
+
+        client.post(
+            f"/api/v1/databases/{test_db}/execute",
+            json={"sql": "CREATE TABLE counters (id INTEGER, label TEXT)"},
+            headers=auth_headers,
+        )
+
+        def _insert(i):
+            client.post(
+                f"/api/v1/databases/{test_db}/execute",
+                json={"sql": f"INSERT INTO counters VALUES ({i}, 'row{i}')"},
+                headers=auth_headers,
+            )
+
+        threads = [threading.Thread(target=_insert, args=(i,)) for i in range(10)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        resp = client.post(
+            f"/api/v1/databases/{test_db}/execute",
+            json={"sql": "SELECT * FROM counters"},
+            headers=auth_headers,
+        )
+        assert resp.json()["row_count"] == 10
+
+
+# ── Query timeout ────────────────────────────────────────────────
+
+
+class TestQueryTimeout:
+    def test_slow_query_returns_504(self, client, auth_headers, test_db, monkeypatch):
+        import time
+        from server.config import settings
+        from chidb.api import YesDB
+
+        monkeypatch.setattr(settings, "QUERY_TIMEOUT_SECONDS", 0.05)
+
+        original_execute = YesDB.execute
+
+        def slow_execute(self, sql):
+            if sql == "SELECT SLOW":
+                time.sleep(0.3)
+                return []
+            return original_execute(self, sql)
+
+        monkeypatch.setattr(YesDB, "execute", slow_execute)
+
+        resp = client.post(
+            f"/api/v1/databases/{test_db}/execute",
+            json={"sql": "SELECT SLOW"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 504
+
+    def test_fast_query_is_unaffected(self, client, auth_headers, test_db, monkeypatch):
+        from server.config import settings
+
+        monkeypatch.setattr(settings, "QUERY_TIMEOUT_SECONDS", 0.05)
+
+        resp = client.post(
+            f"/api/v1/databases/{test_db}/execute",
+            json={"sql": "CREATE TABLE quick (id INTEGER)"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
 
 
 # ── Data isolation ───────────────────────────────────────────────

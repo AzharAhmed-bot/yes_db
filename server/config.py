@@ -22,5 +22,10 @@ class Settings:
         self.HOST: str = os.environ.get("YESDB_HOST", "127.0.0.1")
         self.PORT: int = int(os.environ.get("YESDB_PORT", "8000"))
 
+        # Max seconds to wait for a query before returning a timeout error
+        self.QUERY_TIMEOUT_SECONDS: float = float(
+            os.environ.get("YESDB_QUERY_TIMEOUT_SECONDS", "10")
+        )
+
 
 settings = Settings()
