@@ -21,7 +21,7 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/AzharAhmed-bot/yes_db.git"
-PORT=8000
+PORT=8420  # chosen to avoid colliding with common dev-server defaults (3000/5000/8000/8080)
 
 echo "=== YesDB Cloud Setup ==="
 
