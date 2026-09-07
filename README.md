@@ -192,7 +192,7 @@ DROP TABLE users
 Your machine                   YesDB Cloud Server
 ────────────────               ──────────────────
 yesdb CLI (signup/login/push)   ┌─────────────────┐
-   <-> HTTPS                    │ nginx (SSL)      │
+   <-> HTTPS                    │ Tailscale Funnel │
 yesdb SDK (connect/execute)     │  └─ FastAPI      │
                                 │     ├─ auth      │
                                 │     └─ data/     │
@@ -202,6 +202,11 @@ yesdb SDK (connect/execute)     │  └─ FastAPI      │
                                 │          └─ *.db │
                                 └─────────────────┘
 ```
+
+The server can run on any machine reachable over Tailscale — a cloud VM, a
+home desktop, whatever's available. Tailscale Funnel handles public HTTPS
+without opening router ports or managing a domain/certificate. See
+`deploy/setup.sh`.
 
 - Each user gets their own isolated account with multiple databases
 - All traffic is encrypted over HTTPS
