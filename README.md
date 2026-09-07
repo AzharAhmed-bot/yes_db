@@ -262,9 +262,13 @@ MIT License - see [LICENSE](LICENSE) file
 
 ## Version
 
-Current version: **0.2.0** (Beta)
+Current version: **0.2.1** (Beta)
 
 ### Changelog
+
+#### v0.2.1
+- **Fix**: `yesdb signup`/`yesdb login` default server URL pointed at a dead Azure endpoint (no longer hosted). Now points at the live, self-hosted Cloud instance.
+- **Fix**: Package metadata (`pyproject.toml`, `setup.cfg`) and README referenced the wrong GitHub repo name (`yesdb` instead of `yes_db`), producing broken links.
 
 #### v0.2.0 (Beta)
 - **New**: `GROUP BY` with aggregate functions — `COUNT`, `COUNT(*)`, `SUM`, `AVG`, `MIN`, `MAX`, combinable with `WHERE`, `ORDER BY`, and `LIMIT`/`OFFSET`.
