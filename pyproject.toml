@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yesdb"
-version = "0.1.7"
+version = "0.2.0"
 description = "A lightweight, relational database built from scratch in Python"
 readme = "README.md"
 authors = [
@@ -13,7 +13,7 @@ authors = [
 license = {text = "MIT"}
 classifiers = [
     "License :: OSI Approved :: MIT License",
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Education",
     "Programming Language :: Python :: 3",

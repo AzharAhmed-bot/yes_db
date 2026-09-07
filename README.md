@@ -257,9 +257,15 @@ MIT License - see [LICENSE](LICENSE) file
 
 ## Version
 
-Current version: **0.1.5**
+Current version: **0.2.0** (Beta)
 
 ### Changelog
+
+#### v0.2.0 (Beta)
+- **New**: `GROUP BY` with aggregate functions — `COUNT`, `COUNT(*)`, `SUM`, `AVG`, `MIN`, `MAX`, combinable with `WHERE`, `ORDER BY`, and `LIMIT`/`OFFSET`.
+- **Fix**: Cloud server connection pool had a race condition — concurrent requests could open duplicate connections to the same database, or run unsynchronized queries against it, risking corruption. Access per database is now serialized.
+- **New**: Query execution timeout on the cloud server (default 10s, configurable via `YESDB_QUERY_TIMEOUT_SECONDS`) so a slow query can't block every other user of that database indefinitely.
+- **Status**: Moved from Alpha to Beta. Local Mode is beta-ready; Cloud Mode is feature-complete and tested but not currently deployed (see Cloud Mode section).
 
 #### v0.1.5 (bug fixes)
 - **Fix**: `from yesdb import connect` now works correctly. A `yesdb` compatibility package is included so the import matches the PyPI package name.
