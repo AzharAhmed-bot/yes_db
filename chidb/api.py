@@ -510,50 +510,61 @@ class YesDB:
     
     def _evaluate_where(self, record: 'Record', where_expr, table_meta) -> bool:
         """
-        Evaluate WHERE clause for a record.
-        
-        Simplified implementation - only supports: column = value
+        Evaluate WHERE clause for a record: comparisons, combined with AND/OR.
         """
         from chidb.sql.parser import BinaryOp, Literal, Identifier
-        
-        if isinstance(where_expr, BinaryOp):
-            # Get left side (should be column name)
-            if isinstance(where_expr.left, Identifier):
-                col_name = where_expr.left.name
-                
-                # Find column index
-                col_index = None
-                for i, col_def in enumerate(table_meta.columns):
-                    if col_def.name == col_name:
-                        col_index = i
-                        break
-                
-                if col_index is None:
-                    return False
-                
-                # Get record value
-                record_value = record.get_value(col_index)
-                
-                # Get comparison value
-                if isinstance(where_expr.right, Literal):
-                    compare_value = where_expr.right.value
-                else:
-                    return False
-                
-                # Perform comparison
-                if where_expr.operator == '=':
-                    return record_value == compare_value
-                elif where_expr.operator == '!=':
-                    return record_value != compare_value
-                elif where_expr.operator == '<':
-                    return record_value < compare_value
-                elif where_expr.operator == '>':
-                    return record_value > compare_value
-                elif where_expr.operator == '<=':
-                    return record_value <= compare_value
-                elif where_expr.operator == '>=':
-                    return record_value >= compare_value
-        
+
+        if not isinstance(where_expr, BinaryOp):
+            return True
+
+        if where_expr.operator == 'AND':
+            return (
+                self._evaluate_where(record, where_expr.left, table_meta)
+                and self._evaluate_where(record, where_expr.right, table_meta)
+            )
+        if where_expr.operator == 'OR':
+            return (
+                self._evaluate_where(record, where_expr.left, table_meta)
+                or self._evaluate_where(record, where_expr.right, table_meta)
+            )
+
+        # Get left side (should be column name)
+        if isinstance(where_expr.left, Identifier):
+            col_name = where_expr.left.name
+
+            # Find column index
+            col_index = None
+            for i, col_def in enumerate(table_meta.columns):
+                if col_def.name == col_name:
+                    col_index = i
+                    break
+
+            if col_index is None:
+                return False
+
+            # Get record value
+            record_value = record.get_value(col_index)
+
+            # Get comparison value
+            if isinstance(where_expr.right, Literal):
+                compare_value = where_expr.right.value
+            else:
+                return False
+
+            # Perform comparison
+            if where_expr.operator == '=':
+                return record_value == compare_value
+            elif where_expr.operator == '!=':
+                return record_value != compare_value
+            elif where_expr.operator == '<':
+                return record_value < compare_value
+            elif where_expr.operator == '>':
+                return record_value > compare_value
+            elif where_expr.operator == '<=':
+                return record_value <= compare_value
+            elif where_expr.operator == '>=':
+                return record_value >= compare_value
+
         return True
     
     def _execute_select_advanced(self, stmt: SelectStatement) -> List[List[Any]]:
@@ -584,17 +595,36 @@ class YesDB:
         else:
             all_records = btree.scan()
 
-        # Convert to result rows
-        results = []
+        # Apply WHERE, keeping full (unprojected) rows for now — ORDER BY
+        # may reference a column that isn't in the SELECT list, so it must
+        # resolve against the table's real column positions, not the
+        # already-projected row.
+        full_rows = []
         for key, record in all_records:
-            # Apply WHERE filter if present
             if stmt.where:
                 if not self._evaluate_where(record, stmt.where, table_meta):
                     continue
-            
-            # Extract values
-            values = record.get_values()
-            
+            full_rows.append(record.get_values())
+
+        # Apply ORDER BY against the full row
+        if stmt.order_by:
+            for col_name, direction in reversed(stmt.order_by):
+                # Find column index
+                col_index = None
+                for i, col_def in enumerate(table_meta.columns):
+                    if col_def.name == col_name:
+                        col_index = i
+                        break
+
+                if col_index is not None:
+                    full_rows.sort(
+                        key=lambda values: values[col_index] if col_index < len(values) else None,
+                        reverse=(direction == 'DESC')
+                    )
+
+        # Project to the SELECT column list
+        results = []
+        for values in full_rows:
             # Filter columns if not SELECT *
             if stmt.columns != ['*'] and table_meta:
                 filtered_values = []
@@ -605,10 +635,11 @@ class YesDB:
                                 filtered_values.append(values[i])
                             break
                 values = filtered_values
-            
+
             results.append([Record(values)])
-        
-        # Apply DISTINCT
+
+        # Apply DISTINCT (on the projected output columns, after ORDER BY —
+        # removing duplicate rows preserves the relative order of the rest)
         if stmt.distinct:
             seen = set()
             unique_results = []
@@ -618,22 +649,6 @@ class YesDB:
                     seen.add(row_tuple)
                     unique_results.append(row)
             results = unique_results
-        
-        # Apply ORDER BY
-        if stmt.order_by:
-            for col_name, direction in reversed(stmt.order_by):
-                # Find column index
-                col_index = None
-                for i, col_def in enumerate(table_meta.columns):
-                    if col_def.name == col_name:
-                        col_index = i
-                        break
-                
-                if col_index is not None:
-                    results.sort(
-                        key=lambda row: row[0].get_values()[col_index] if col_index < len(row[0].get_values()) else None,
-                        reverse=(direction == 'DESC')
-                    )
         
         # Apply OFFSET
         if stmt.offset:

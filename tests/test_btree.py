@@ -312,9 +312,78 @@ class TestBTreeEdgeCases:
         btree = BTree(temp_db)
         large_text = "x" * 1000
         record = Record([large_text])
-        
+
         btree.insert(1, record)
-        
+
         result = btree.search(1)
         assert result is not None
         assert result.get_value(0) == large_text
+
+
+class TestBTreeMultiLevelRouting:
+    """
+    Regression tests for internal-node child routing on insert/delete.
+
+    Internal cells are (separator_key, child_page) where child_page holds
+    only keys < separator_key; a key equal to a separator belongs in the
+    *next* child (or right_page). Insert/delete must route the same way
+    search does, or a key landing exactly on a split point becomes
+    unreachable to insert/delete (while still being findable by search).
+    These tests force enough splits that this actually gets exercised,
+    not just a single-leaf tree.
+    """
+
+    def test_delete_every_key_leaves_tree_empty(self, temp_db):
+        btree = BTree(temp_db)
+        n = 400
+        for k in range(1, n + 1):
+            btree.insert(k, Record([f"row{k}"]))
+
+        for k in range(1, n + 1):
+            deleted = btree.delete(k)
+            assert deleted, f"delete() reported key {k} not found"
+
+        assert btree.scan() == []
+
+    def test_search_and_delete_agree_on_every_key(self, temp_db):
+        btree = BTree(temp_db)
+        n = 500
+        for k in range(1, n + 1):
+            btree.insert(k, Record([k]))
+
+        for k in range(1, n + 1):
+            assert btree.search(k) is not None, f"search() can't find key {k} before delete"
+
+        for k in range(1, n + 1):
+            assert btree.delete(k), f"delete() failed for key {k} even though search() found it"
+
+    def test_update_via_delete_then_insert_on_every_key(self, temp_db):
+        btree = BTree(temp_db)
+        n = 400
+        for k in range(1, n + 1):
+            btree.insert(k, Record([k]))
+
+        for k in range(1, n + 1):
+            assert btree.update(k, Record([k * 1000])), f"update() failed for key {k}"
+
+        for k in range(1, n + 1):
+            record = btree.search(k)
+            assert record is not None and record.get_value(0) == k * 1000, (
+                f"key {k} wasn't actually updated (got {record})"
+            )
+
+    def test_no_duplicate_rows_from_reinserting_existing_keys(self, temp_db):
+        btree = BTree(temp_db)
+        n = 400
+        for k in range(1, n + 1):
+            btree.insert(k, Record([f"first-{k}"]))
+
+        # Re-insert every key with a new value — should update in place,
+        # never create a second row for the same key.
+        for k in range(1, n + 1):
+            btree.insert(k, Record([f"second-{k}"]))
+
+        all_rows = btree.scan()
+        assert len(all_rows) == n, f"expected {n} rows, got {len(all_rows)} (duplicates present)"
+        for key, record in all_rows:
+            assert record.get_value(0) == f"second-{key}"

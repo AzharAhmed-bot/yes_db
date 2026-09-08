@@ -39,6 +39,7 @@ class Opcode(IntEnum):
     SEEK = 23          # Seek to specific key
     DELETE = 24        # Delete current record
     COLUMN = 25        # Extract column from record
+    FLOAT = 26         # Push float constant onto stack
 
 
 @dataclass
@@ -232,7 +233,10 @@ class DatabaseMachine:
         
         elif opcode == Opcode.INTEGER:
             self._op_integer(instr.p1)
-        
+
+        elif opcode == Opcode.FLOAT:
+            self._op_float(instr.p4)
+
         elif opcode == Opcode.STRING:
             self._op_string(instr.p4)
         
@@ -343,7 +347,11 @@ class DatabaseMachine:
     def _op_integer(self, value: int) -> None:
         """Push integer constant onto stack."""
         self.stack.append(value)
-    
+
+    def _op_float(self, value: float) -> None:
+        """Push float constant onto stack."""
+        self.stack.append(value)
+
     def _op_string(self, value: str) -> None:
         """Push string constant onto stack."""
         self.stack.append(value)
@@ -409,23 +417,19 @@ class DatabaseMachine:
         self.stack.append(result)
     
     def _op_delete(self, cursor_id: int) -> None:
-        """
-        Delete current record from cursor.
-        Note: This is a simplified implementation.
-        """
+        """Delete the record the cursor currently points to."""
         cursor = self.cursors[cursor_id]
         if not cursor.writable:
             raise RuntimeError("Cannot delete from read-only cursor")
-        
+
         if not cursor.is_valid():
             raise RuntimeError("Cursor not pointing to valid record")
-        
-        # Get current key
+
         key = cursor.get_key()
-        
-        # For simplicity, we'll mark it as deleted by reloading data
-        # In a real implementation, we'd remove from B-tree
-        # This is a placeholder - actual deletion would require B-tree delete
+        cursor.btree.delete(key)
+
+        # The cursor's cached row list is now stale at this position;
+        # invalidate it so a caller can't read a just-deleted row.
         cursor.valid = False
     
     def _op_column(self, cursor_id: int, column_index: int) -> None:

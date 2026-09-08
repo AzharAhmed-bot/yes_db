@@ -783,8 +783,8 @@ class Parser:
             name = self.parse_qualified_name()
             return Identifier(name=name)
         
-        elif self.match(TokenType.INTEGER_LITERAL, TokenType.STRING_LITERAL, 
-                        TokenType.FLOAT_LITERAL, TokenType.NULL):
+        elif self.match(TokenType.INTEGER_LITERAL, TokenType.STRING_LITERAL,
+                        TokenType.FLOAT_LITERAL, TokenType.NULL, TokenType.MINUS):
             return self.parse_literal()
         
         elif self.match(TokenType.LPAREN):
@@ -797,12 +797,20 @@ class Parser:
             raise ParseError(f"Unexpected token in expression: {self.current_token}")
     
     def parse_literal(self) -> Literal:
-        """Parse a literal value."""
+        """Parse a literal value, including a negative number (-5, -3.14)."""
+        if self.match(TokenType.MINUS):
+            self.advance()
+            if self.match(TokenType.INTEGER_LITERAL, TokenType.FLOAT_LITERAL):
+                value = self.current_token.value
+                self.advance()
+                return Literal(value=-value)
+            raise ParseError(f"Expected number after '-', got {self.current_token}")
+
         if self.match(TokenType.INTEGER_LITERAL):
             value = self.current_token.value
             self.advance()
             return Literal(value=value)
-        
+
         elif self.match(TokenType.STRING_LITERAL):
             value = self.current_token.value
             self.advance()
@@ -821,12 +829,20 @@ class Parser:
             raise ParseError(f"Expected literal, got {self.current_token}")
     
     def parse_literal_value(self) -> Any:
-        """Parse a literal value and return its Python value."""
+        """Parse a literal value and return its Python value, including a negative number."""
+        if self.match(TokenType.MINUS):
+            self.advance()
+            if self.match(TokenType.INTEGER_LITERAL, TokenType.FLOAT_LITERAL):
+                value = self.current_token.value
+                self.advance()
+                return -value
+            raise ParseError(f"Expected number after '-', got {self.current_token}")
+
         if self.match(TokenType.INTEGER_LITERAL):
             value = self.current_token.value
             self.advance()
             return value
-        
+
         elif self.match(TokenType.STRING_LITERAL):
             value = self.current_token.value
             self.advance()

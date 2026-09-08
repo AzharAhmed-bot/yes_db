@@ -499,6 +499,18 @@ class TestParserInsert:
         assert isinstance(ast, InsertStatement)
         assert ast.values == [1, None]
 
+    def test_parse_insert_negative_integer(self):
+        ast = parse("INSERT INTO t VALUES (1, -7)")
+        assert ast.values == [1, -7]
+
+    def test_parse_insert_negative_float(self):
+        ast = parse("INSERT INTO t VALUES (1, -3.25)")
+        assert ast.values == [1, -3.25]
+
+    def test_parse_where_with_negative_literal(self):
+        ast = parse("SELECT * FROM t WHERE cnt = -7")
+        assert ast.where == BinaryOp(left=Identifier(name='cnt'), operator='=', right=Literal(value=-7))
+
 
 class TestParserCreateTable:
     """Test CREATE TABLE statement parsing."""

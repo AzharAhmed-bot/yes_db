@@ -95,6 +95,51 @@ class TestInsert:
             db.execute('CREATE TABLE test (id INTEGER, name TEXT, age INTEGER)')
             db.execute("INSERT INTO test VALUES (1, 'Bob', 25)")
 
+    def test_insert_real_value_is_not_truncated(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, val REAL)')
+            db.execute('INSERT INTO t VALUES (1, 10.5)')
+            db.execute('INSERT INTO t VALUES (2, 0.1)')
+            db.execute('INSERT INTO t VALUES (3, 3.14159)')
+
+            results = db.execute('SELECT val FROM t ORDER BY id')
+
+            assert [r[0].get_values() for r in results] == [[10.5], [0.1], [3.14159]]
+
+    def test_insert_negative_integer(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, cnt INTEGER)')
+            db.execute('INSERT INTO t VALUES (1, -7)')
+
+            results = db.execute('SELECT cnt FROM t')
+            assert results[0][0].get_values() == [-7]
+
+    def test_insert_negative_real(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, val REAL)')
+            db.execute('INSERT INTO t VALUES (1, -3.25)')
+
+            results = db.execute('SELECT val FROM t')
+            assert results[0][0].get_values() == [-3.25]
+
+    def test_where_with_negative_literal(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, cnt INTEGER)')
+            db.execute('INSERT INTO t VALUES (1, -7)')
+            db.execute('INSERT INTO t VALUES (2, 7)')
+
+            results = db.execute('SELECT id FROM t WHERE cnt = -7')
+            assert results[0][0].get_values() == [1]
+
+    def test_update_set_negative_value(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, cnt INTEGER)')
+            db.execute('INSERT INTO t VALUES (1, 5)')
+            db.execute('UPDATE t SET cnt = -100 WHERE id = 1')
+
+            results = db.execute('SELECT cnt FROM t WHERE id = 1')
+            assert results[0][0].get_values() == [-100]
+
 
 class TestSelect:
     """Test SELECT functionality."""
@@ -166,6 +211,69 @@ class TestSelect:
 
             assert len(results) == 1
             assert results[0][0].get_values() == ['Alice']
+
+    def test_order_by_column_not_in_select_list(self, temp_db_path):
+        """
+        Regression: ORDER BY resolved its column index against the full
+        table schema but applied it to the already-projected row, so
+        ordering by a column outside the SELECT list sorted by the wrong
+        values entirely.
+        """
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)')
+            db.execute("INSERT INTO t VALUES (1, 'Carol', 40)")
+            db.execute("INSERT INTO t VALUES (2, 'Alice', 20)")
+            db.execute("INSERT INTO t VALUES (3, 'Bob', 30)")
+
+            results = db.execute('SELECT name FROM t ORDER BY age')
+            assert [r[0].get_values() for r in results] == [['Alice'], ['Bob'], ['Carol']]
+
+            results_desc = db.execute('SELECT name FROM t ORDER BY age DESC')
+            assert [r[0].get_values() for r in results_desc] == [['Carol'], ['Bob'], ['Alice']]
+
+
+class TestWhereAndOr:
+    """
+    Regression tests: a compound WHERE (AND/OR) must not silently match
+    every row. _evaluate_where only handled a single `column OP value`
+    comparison; a top-level AND/OR fell through to `return True`.
+    """
+
+    @pytest.fixture
+    def rows_db(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, a INTEGER, b INTEGER)')
+            db.execute('INSERT INTO t VALUES (1, 5, 5)')
+            db.execute('INSERT INTO t VALUES (2, 5, 9)')
+            db.execute('INSERT INTO t VALUES (3, 1, 5)')
+            yield db
+
+    def test_select_with_and_only_matches_both_conditions(self, rows_db):
+        results = rows_db.execute('SELECT * FROM t WHERE a = 5 AND b = 5')
+        assert _row_values(results) == [[1, 5, 5]]
+
+    def test_select_with_or_matches_either_condition(self, rows_db):
+        results = rows_db.execute('SELECT * FROM t WHERE a = 1 OR b = 9')
+        ids = sorted(row[0] for row in _row_values(results))
+        assert ids == [2, 3]
+
+    def test_delete_with_and_only_removes_matching_rows(self, rows_db):
+        rows_db.execute('DELETE FROM t WHERE a = 5 AND b = 5')
+        remaining = sorted(row[0] for row in _row_values(rows_db.execute('SELECT * FROM t')))
+        assert remaining == [2, 3]
+
+    def test_update_with_and_only_updates_matching_rows(self, rows_db):
+        rows_db.execute('UPDATE t SET b = 0 WHERE a = 5 AND b = 5')
+        results = {row[0]: row[2] for row in _row_values(rows_db.execute('SELECT * FROM t'))}
+        assert results == {1: 0, 2: 9, 3: 5}
+
+    def test_three_way_and_chain(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, a INTEGER, b INTEGER, c INTEGER)')
+            db.execute('INSERT INTO t VALUES (1, 1, 1, 1)')
+            db.execute('INSERT INTO t VALUES (2, 1, 1, 2)')
+            results = db.execute('SELECT * FROM t WHERE a = 1 AND b = 1 AND c = 1')
+            assert _row_values(results) == [[1, 1, 1, 1]]
 
 
 class TestEndToEnd:

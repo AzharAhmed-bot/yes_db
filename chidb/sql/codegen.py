@@ -1,6 +1,19 @@
 """
 SQL Code Generator - Translates AST into DBM instructions.
 Converts optimized AST nodes into executable instruction sequences.
+
+NOTE: chidb/api.py's execute() only routes InsertStatement through this
+module's generate()/generate_insert() — every other statement (SELECT,
+UPDATE, DELETE, DDL) is handled directly against the B-tree/catalog in
+api.py, before it would ever reach here. generate_select(),
+generate_update(), generate_delete(), generate_create_table(), and the
+generate_where_filter()/generate_expression() helpers they use are
+consequently dead in the real execution path today — they're exercised
+only by this module's own unit tests (tests/test_codgen.py), not by any
+real query. In particular, generate_update()/generate_delete() are
+incomplete stubs (they don't actually apply updates or scan for matching
+rows) — don't assume they work, and don't wire a statement type into this
+path without first making its generate_*() implementation real.
 """
 
 from typing import List, Dict, Any
@@ -210,9 +223,7 @@ class CodeGenerator:
             elif isinstance(value, str):
                 instructions.append(Instruction(Opcode.STRING, p4=value))
             elif isinstance(value, float):
-                # For floats, we'll push as integer (simplified)
-                # In full implementation, add FLOAT opcode
-                instructions.append(Instruction(Opcode.INTEGER, p1=int(value)))
+                instructions.append(Instruction(Opcode.FLOAT, p4=value))
             else:
                 raise ValueError(f"Unsupported value type: {type(value)}")
         

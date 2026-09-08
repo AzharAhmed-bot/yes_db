@@ -287,9 +287,17 @@ MIT License - see [LICENSE](LICENSE) file
 
 ## Version
 
-Current version: **0.6.0** (Beta)
+Current version: **0.6.1** (Beta)
 
 ### Changelog
+
+#### v0.6.1
+- **Fix (critical)**: `WHERE ... AND/OR ...` silently matched every row instead of applying the condition — affected SELECT, UPDATE, and DELETE alike (e.g. `DELETE FROM t WHERE a = 1 AND b = 2` deleted the entire table). `_evaluate_where` now recursively evaluates AND/OR instead of only handling a single comparison.
+- **Fix (critical)**: Once a table's B-tree grew past one page, INSERT/UPDATE/DELETE could misroute a key that exactly matched an internal split point — silently failing UPDATE/DELETE (reported success, changed nothing) and allowing duplicate PRIMARY KEY rows on INSERT. Internal-node routing in `chidb/btree.py` now matches `search()`'s (already-correct) equality-aware logic.
+- **Fix**: `INSERT` of a `REAL` value was silently truncated to an integer (no `FLOAT` opcode existed in the bytecode VM). Added one; `10.5` no longer becomes `10`.
+- **Fix**: Negative number literals (`-5`, `-3.25`) couldn't be parsed at all, in `INSERT`, `UPDATE ... SET`, or `WHERE`.
+- **Fix**: `ORDER BY` on a column not included in the `SELECT` list sorted by the wrong values entirely (it resolved the column's position against the full schema but applied it to the already-projected row). `SELECT name FROM t ORDER BY age` now actually orders by `age`.
+- **Improved**: The DBM bytecode VM's `DELETE` opcode was a no-op stub (didn't call `btree.delete()`) — fixed, and documented that it and several other codegen paths (`generate_select`/`generate_update`/`generate_delete`/`generate_create_table`) aren't wired into real query execution today (every statement except INSERT is handled directly in `api.py`), so nobody mistakes them for working code.
 
 #### v0.6.0
 - **New**: Foreign key constraints — `column TYPE REFERENCES table(column)` in `CREATE TABLE` (and `ALTER TABLE ADD COLUMN`). Enforced on `INSERT` and `UPDATE` (a non-NULL value must match an existing row in the referenced table/column); `DELETE` from a referenced row is rejected (RESTRICT) while any other table still references it. `CREATE TABLE` validates the referenced table/column exist up front, rather than failing only on first insert.

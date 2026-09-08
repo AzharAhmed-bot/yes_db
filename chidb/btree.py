@@ -286,13 +286,26 @@ class BTree:
         Returns:
             None if no split, or (split_key, new_page_id) if split
         """
-        # Find which child to descend to
+        # Find which child to descend to. cell[i] = (key[i], child[i]) where
+        # child[i] holds only keys < key[i] — a key equal to a separator
+        # belongs in the *next* child (or right_page), never in child[i]
+        # itself. This must stay consistent with _search_recursive's routing.
         insert_idx = node.find_key_index(key)
 
         if insert_idx < node.num_keys:
-            _, child_page = node.read_cell(insert_idx)
+            separator_key, cell_child_page = node.read_cell(insert_idx)
+            if key < separator_key:
+                child_page = cell_child_page
+                child_idx = insert_idx
+            elif insert_idx + 1 < node.num_keys:
+                _, child_page = node.read_cell(insert_idx + 1)
+                child_idx = insert_idx + 1
+            else:
+                child_page = node.right_page
+                child_idx = node.num_keys
         else:
             child_page = node.right_page
+            child_idx = node.num_keys
 
         # Recursively insert into child
         split_result = self._insert_recursive(child_page, key, record_data)
@@ -305,7 +318,7 @@ class BTree:
         # - child_page (the original) is now the LEFT child with keys < split_key
         # - new_page is the RIGHT child with keys >= split_key
         split_key, new_page = split_result
-        return self._insert_split_into_internal(node, split_key, child_page, new_page, insert_idx)
+        return self._insert_split_into_internal(node, split_key, child_page, new_page, child_idx)
     
     def _insert_leaf_cell(self, node: BTreeNode, index: int, key: int, record_data: bytes) -> None:
         """Insert a cell into a leaf node at the specified index."""
@@ -710,12 +723,24 @@ class BTree:
             
             return False
         else:
-            # Internal node - find which child to descend to
+            # Internal node - find which child to descend to. Must match
+            # _search_recursive's routing: cell[i] = (key[i], child[i])
+            # where child[i] holds only keys < key[i], so a key equal to
+            # the separator lives in the *next* child (or right_page).
             idx = node.find_key_index(key)
-            
+
             if idx < node.num_keys:
-                _, child_page = node.read_cell(idx)
-                return self._delete_recursive(child_page, key)
+                separator_key, child_page = node.read_cell(idx)
+
+                if key < separator_key:
+                    return self._delete_recursive(child_page, key)
+                elif idx + 1 < node.num_keys:
+                    _, next_child_page = node.read_cell(idx + 1)
+                    return self._delete_recursive(next_child_page, key)
+                else:
+                    if node.right_page and node.right_page > 0:
+                        return self._delete_recursive(node.right_page, key)
+                    return False
             else:
                 if node.right_page and node.right_page > 0:
                     return self._delete_recursive(node.right_page, key)

@@ -146,6 +146,17 @@ class TestDatabaseMachine:
         assert len(dbm.stack) == 1
         assert dbm.stack[0] == "hello"
     
+    def test_float_instruction(self, temp_db):
+        dbm = DatabaseMachine(temp_db)
+        program = [
+            Instruction(Opcode.FLOAT, p4=10.5),
+            Instruction(Opcode.HALT)
+        ]
+
+        dbm.execute(program)
+        assert len(dbm.stack) == 1
+        assert dbm.stack[0] == 10.5
+
     def test_null_instruction(self, temp_db):
         dbm = DatabaseMachine(temp_db)
         program = [
@@ -246,6 +257,29 @@ class TestDatabaseMachineTableOperations:
         assert len(results) == 2
         assert results[0][0] == 1
         assert results[1][0] == 2
+
+    def test_delete_opcode_actually_removes_the_row(self, temp_db):
+        """
+        Regression: _op_delete used to only invalidate the cursor and never
+        call btree.delete(), so the row silently survived.
+        """
+        btree = BTree(temp_db)
+        btree.insert(1, Record([100, "first"]))
+        root_page = btree.get_root_page()
+
+        dbm = DatabaseMachine(temp_db)
+        program = [
+            Instruction(Opcode.OPEN_WRITE, p1=0, p2=root_page),
+            Instruction(Opcode.REWIND, p1=0, p2=4),
+            Instruction(Opcode.DELETE, p1=0),
+            Instruction(Opcode.CLOSE, p1=0),
+            Instruction(Opcode.HALT)
+        ]
+
+        dbm.execute(program)
+
+        assert btree.search(1) is None
+        assert btree.scan() == []
 
 
 class TestDatabaseMachineComparisons:
