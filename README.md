@@ -262,9 +262,12 @@ MIT License - see [LICENSE](LICENSE) file
 
 ## Version
 
-Current version: **0.2.4** (Beta)
+Current version: **0.2.5** (Beta)
 
 ### Changelog
+
+#### v0.2.5
+- **New**: A real first-run welcome — bare `yesdb` and `yesdb signup` now show a block-letter YESDB logo alongside the version/Beta tagline, plus a "New here? Get started" quickstart (signup → init → push, with a pointer to local mode) instead of just a bare help dump.
 
 #### v0.2.4
 - **Changed**: Dropped "educational" framing everywhere (PyPI classifiers/keywords, package docstring, README, SECURITY.md) in favor of a clear Beta positioning — YesDB is usable for real projects now, not just a teaching toy.

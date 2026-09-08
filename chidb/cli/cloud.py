@@ -36,8 +36,52 @@ from chidb.schema import Table, collect_tables
 DEFAULT_SERVER_URL = "https://tbl-eng-01-1.tailea5de0.ts.net"
 PROJECT_CONFIG_FILE = os.path.join("yesdb", ".yesdb.json")
 
+# 5-row block font, just enough letters to spell "YESDB" for the CLI logo.
+_LOGO_FONT = {
+    'Y': ["#   #", " # # ", "  #  ", "  #  ", "  #  "],
+    'E': ["#####", "#    ", "###  ", "#    ", "#####"],
+    'S': [" ####", "#    ", " ### ", "    #", "#### "],
+    'D': ["#### ", "#   #", "#   #", "#   #", "#### "],
+    'B': ["#### ", "#   #", "#### ", "#   #", "#### "],
+}
+
 
 # ── Helpers ──────────────────────────────────────────────────────
+
+
+def _use_color() -> bool:
+    """Only colorize real terminals — never piped/redirected output."""
+    return sys.stdout.isatty()
+
+
+def _c(text: str, code: str) -> str:
+    if not _use_color():
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+
+def _render_logo(word: str, gap: int = 1, block: str = "█") -> list:
+    """Render word as 5-row block-letter ASCII art using _LOGO_FONT."""
+    letters = [_LOGO_FONT[ch] for ch in word]
+    return [
+        (" " * gap).join(letter[row] for letter in letters).replace("#", block)
+        for row in range(5)
+    ]
+
+
+def _print_banner() -> None:
+    """Print the YesDB logo and tagline for first-touch moments (bare
+    'yesdb' and 'yesdb signup'). Falls back to plain text automatically
+    when stdout isn't a real terminal."""
+    from chidb import __version__
+
+    print()
+    for line in _render_logo("YESDB"):
+        print(_c(line, "36"))
+    print()
+    tagline = f"  v{__version__} · BETA · a relational database built from scratch in Python"
+    print(_c(tagline, "2"))
+    print()
 
 
 def _require_requests() -> bool:
@@ -127,9 +171,7 @@ def cmd_signup(args) -> int:
     if not _require_requests():
         return 1
 
-    from chidb import __version__
-
-    print(f"YesDB v{__version__} (Beta) — a relational database built from scratch in Python.")
+    _print_banner()
     print("Let's create your cloud account.\n")
 
     email = input("Email: ").strip()
@@ -533,6 +575,13 @@ def main(args: Optional[list] = None) -> int:
     parsed = parser.parse_args(args)
 
     if parsed.command is None:
+        _print_banner()
+        print("New here? Get started:")
+        print("  yesdb signup              Create a free account")
+        print("  yesdb init <project>      Create your first database")
+        print("  yesdb push                Sync your schema to the cloud")
+        print()
+        print("Prefer to work locally? Try: yesdb-local <file>.db\n")
         parser.print_help()
         return 0
 
