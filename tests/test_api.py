@@ -714,3 +714,67 @@ class TestTransactions:
 
         with YesDB(temp_db_path) as db2:
             assert _row_values(db2.execute('SELECT * FROM t')) == [[1, 'a']]
+
+
+class TestForeignKeys:
+    """Test REFERENCES constraint enforcement."""
+
+    @pytest.fixture
+    def shop_db(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)')
+            db.execute(
+                'CREATE TABLE orders (id INTEGER PRIMARY KEY, '
+                'user_id INTEGER REFERENCES users(id), total INTEGER)'
+            )
+            db.execute("INSERT INTO users VALUES (1, 'Alice')")
+            yield db
+
+    def test_create_table_rejects_unknown_referenced_table(self, shop_db):
+        with pytest.raises(ValueError):
+            shop_db.execute('CREATE TABLE bad (id INTEGER, x INTEGER REFERENCES ghosts(id))')
+
+    def test_create_table_rejects_unknown_referenced_column(self, shop_db):
+        with pytest.raises(ValueError):
+            shop_db.execute('CREATE TABLE bad (id INTEGER, x INTEGER REFERENCES users(ghost_col))')
+
+    def test_insert_with_valid_fk_succeeds(self, shop_db):
+        shop_db.execute('INSERT INTO orders VALUES (1, 1, 100)')
+        assert _row_values(shop_db.execute('SELECT * FROM orders')) == [[1, 1, 100]]
+
+    def test_insert_with_invalid_fk_rejected(self, shop_db):
+        with pytest.raises(ValueError, match="Foreign key"):
+            shop_db.execute('INSERT INTO orders VALUES (1, 999, 100)')
+
+    def test_insert_with_null_fk_allowed(self, shop_db):
+        shop_db.execute('INSERT INTO orders VALUES (1, NULL, 100)')
+        assert _row_values(shop_db.execute('SELECT * FROM orders')) == [[1, None, 100]]
+
+    def test_update_to_invalid_fk_rejected(self, shop_db):
+        shop_db.execute('INSERT INTO orders VALUES (1, 1, 100)')
+        with pytest.raises(ValueError, match="Foreign key"):
+            shop_db.execute('UPDATE orders SET user_id = 999 WHERE id = 1')
+
+    def test_update_to_valid_fk_succeeds(self, shop_db):
+        shop_db.execute("INSERT INTO users VALUES (2, 'Bob')")
+        shop_db.execute('INSERT INTO orders VALUES (1, 1, 100)')
+        shop_db.execute('UPDATE orders SET user_id = 2 WHERE id = 1')
+        assert _row_values(shop_db.execute('SELECT * FROM orders')) == [[1, 2, 100]]
+
+    def test_delete_referenced_parent_row_rejected(self, shop_db):
+        shop_db.execute('INSERT INTO orders VALUES (1, 1, 100)')
+        with pytest.raises(ValueError, match="still referenced"):
+            shop_db.execute('DELETE FROM users WHERE id = 1')
+        # Nothing should have been deleted.
+        assert _row_values(shop_db.execute('SELECT * FROM users')) == [[1, 'Alice']]
+
+    def test_delete_unreferenced_parent_row_succeeds(self, shop_db):
+        shop_db.execute("INSERT INTO users VALUES (2, 'Bob')")
+        shop_db.execute('DELETE FROM users WHERE id = 2')
+        assert _row_values(shop_db.execute('SELECT * FROM users')) == [[1, 'Alice']]
+
+    def test_delete_child_row_then_parent_succeeds(self, shop_db):
+        shop_db.execute('INSERT INTO orders VALUES (1, 1, 100)')
+        shop_db.execute('DELETE FROM orders WHERE id = 1')
+        shop_db.execute('DELETE FROM users WHERE id = 1')
+        assert _row_values(shop_db.execute('SELECT * FROM users')) == []

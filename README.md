@@ -152,6 +152,7 @@ YesDB> SELECT * FROM users;
 - **B-Tree Storage**: Efficient indexing and data retrieval
 - **Secondary Indexes**: `CREATE INDEX` accelerates equality lookups on non-primary-key columns
 - **Transactions**: `BEGIN` / `COMMIT` / `ROLLBACK` for INSERT/UPDATE/DELETE
+- **Foreign Keys**: `REFERENCES` constraints, enforced on INSERT/UPDATE, with RESTRICT on DELETE
 - **No Dependencies**: Pure Python implementation (local mode)
 - **Cloud BaaS**: Host your database remotely with a single command
 - **Schema DSL**: Define tables in Python, push to cloud
@@ -164,6 +165,13 @@ YesDB> SELECT * FROM users;
 ```sql
 -- Create table
 CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, age INTEGER)
+
+-- Foreign keys (enforced on INSERT/UPDATE; RESTRICT on DELETE of a referenced row)
+CREATE TABLE orders (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id),
+  total REAL
+)
 
 -- Insert data
 INSERT INTO users VALUES (NULL, 'Alice', 'alice@example.com', 30)
@@ -279,9 +287,12 @@ MIT License - see [LICENSE](LICENSE) file
 
 ## Version
 
-Current version: **0.5.0** (Beta)
+Current version: **0.6.0** (Beta)
 
 ### Changelog
+
+#### v0.6.0
+- **New**: Foreign key constraints — `column TYPE REFERENCES table(column)` in `CREATE TABLE` (and `ALTER TABLE ADD COLUMN`). Enforced on `INSERT` and `UPDATE` (a non-NULL value must match an existing row in the referenced table/column); `DELETE` from a referenced row is rejected (RESTRICT) while any other table still references it. `CREATE TABLE` validates the referenced table/column exist up front, rather than failing only on first insert.
 
 #### v0.5.0
 - **New**: `BEGIN` / `COMMIT` / `ROLLBACK` transactions for INSERT/UPDATE/DELETE. Implemented as an in-memory snapshot-and-restore of the pager's page cache (where writes already live until `flush()`), so ROLLBACK is a pure in-memory operation — no partial writes ever reach disk. DDL (CREATE/DROP TABLE, ALTER TABLE, CREATE/DROP INDEX) is not allowed inside an active transaction, since it flushes to disk immediately and an in-memory rollback couldn't undo that. Closing a database with an active transaction rolls it back automatically.

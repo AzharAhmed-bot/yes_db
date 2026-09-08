@@ -141,9 +141,12 @@ class ColumnDef:
     name: str
     type: str  # INTEGER, TEXT, REAL
     primary_key: bool = False
-    
+    references_table: Optional[str] = None
+    references_column: Optional[str] = None
+
     def __repr__(self) -> str:
-        return f"ColumnDef({self.name}, {self.type}, pk={self.primary_key})"
+        ref = f", references={self.references_table}({self.references_column})" if self.references_table else ""
+        return f"ColumnDef({self.name}, {self.type}, pk={self.primary_key}{ref})"
 
 
 @dataclass
@@ -675,9 +678,9 @@ class Parser:
     def parse_column_def(self) -> ColumnDef:
         """
         Parse a column definition.
-        
+
         Grammar:
-        name type [PRIMARY KEY]
+        name type [PRIMARY KEY] [REFERENCES table (column)]
         """
         name = self.expect(TokenType.IDENTIFIER).value
         
@@ -700,8 +703,21 @@ class Parser:
             self.advance()
             self.expect(TokenType.KEY)
             primary_key = True
-        
-        return ColumnDef(name=name, type=col_type, primary_key=primary_key)
+
+        # Check for REFERENCES table (column)
+        references_table = None
+        references_column = None
+        if self.match(TokenType.REFERENCES):
+            self.advance()
+            references_table = self.expect(TokenType.IDENTIFIER).value
+            self.expect(TokenType.LPAREN)
+            references_column = self.expect(TokenType.IDENTIFIER).value
+            self.expect(TokenType.RPAREN)
+
+        return ColumnDef(
+            name=name, type=col_type, primary_key=primary_key,
+            references_table=references_table, references_column=references_column
+        )
     
     def parse_expression(self) -> Expression:
         """

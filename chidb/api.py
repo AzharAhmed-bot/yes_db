@@ -52,7 +52,9 @@ class TableMetadata:
                 {
                     'name': col.name,
                     'type': col.type,
-                    'primary_key': col.primary_key
+                    'primary_key': col.primary_key,
+                    'references_table': col.references_table,
+                    'references_column': col.references_column
                 }
                 for col in self.columns
             ],
@@ -67,7 +69,9 @@ class TableMetadata:
             ColumnDef(
                 name=col['name'],
                 type=col['type'],
-                primary_key=col['primary_key']
+                primary_key=col['primary_key'],
+                references_table=col.get('references_table'),
+                references_column=col.get('references_column')
             )
             for col in data['columns']
         ]
@@ -288,6 +292,10 @@ class YesDB:
             if isinstance(ast, SelectStatement):
                 return self._execute_select_advanced(ast)
 
+            # Enforce REFERENCES constraints before the row is written
+            if isinstance(ast, InsertStatement):
+                self._validate_foreign_keys(ast.table, ast.values)
+
             # Optimization
             ast = self.optimizer.optimize(ast)
             
@@ -359,7 +367,12 @@ class YesDB:
 
         if table_name in self.tables:
             raise QueryError(f"Table '{table_name}' already exists")
-        
+
+        # Validate REFERENCES clauses point at real tables/columns
+        for col in stmt.columns:
+            if col.references_table:
+                self._validate_foreign_key_target(col.references_table, col.references_column)
+
         # Create a new B-tree for this table
         btree = BTree(self.pager)
         root_page = btree.get_root_page()
@@ -434,6 +447,9 @@ class YesDB:
                             values[i] = new_value
                             break
                 
+                # Enforce REFERENCES constraints on the updated row
+                self._validate_foreign_keys(table_name, values)
+
                 # Update the record
                 new_record = Record(values)
                 btree.update(key, new_record)
@@ -463,18 +479,25 @@ class YesDB:
         
         # Scan all records to find ones to delete
         all_records = btree.scan()
-        keys_to_delete = []
-        
+        rows_to_delete = []
+
         for key, record in all_records:
             # Check if this record matches WHERE clause
             should_delete = True
-            
+
             if stmt.where:
                 should_delete = self._evaluate_where(record, stmt.where, table_meta)
-            
+
             if should_delete:
-                keys_to_delete.append(key)
-        
+                rows_to_delete.append((key, record))
+
+        # Enforce RESTRICT: refuse the whole DELETE if any row is still
+        # referenced by another table's foreign key, before deleting anything.
+        for _, record in rows_to_delete:
+            self._reject_referenced_row_deletion(table_name, table_meta, record)
+
+        keys_to_delete = [key for key, _ in rows_to_delete]
+
         # Delete the keys
         for key in keys_to_delete:
             btree.delete(key)
@@ -944,6 +967,71 @@ class YesDB:
             if col_def.name == name:
                 return index
         raise QueryError(f"Unknown column: {name}")
+
+    def _validate_foreign_key_target(self, table_name: str, column_name: str) -> None:
+        """Check a REFERENCES clause points at a real table and column (used at CREATE TABLE time)."""
+        if table_name not in self.tables:
+            raise QueryError(f"Foreign key references unknown table '{table_name}'")
+        table_meta = self.table_metadata.get(table_name)
+        if not any(col.name == column_name for col in table_meta.columns):
+            raise QueryError(f"Foreign key references unknown column '{table_name}.{column_name}'")
+
+    def _table_has_matching_row(self, table_name: str, column_name: str, value: Any) -> bool:
+        """Check whether any row in a table has the given value in the given column."""
+        table_meta = self.table_metadata.get(table_name)
+        column_index = self._column_index(column_name, table_meta)
+        btree = BTree(self.pager, self.tables[table_name])
+        return any(record.get_values()[column_index] == value for _, record in btree.scan())
+
+    def _validate_foreign_keys(self, table_name: str, values: List[Any]) -> None:
+        """
+        Enforce every REFERENCES constraint on a table's columns against a
+        candidate row (used for both INSERT and UPDATE). A NULL foreign key
+        value is always allowed.
+        """
+        table_meta = self.table_metadata.get(table_name)
+        if not table_meta:
+            return
+
+        for i, col in enumerate(table_meta.columns):
+            if not col.references_table or i >= len(values):
+                continue
+
+            value = values[i]
+            if value is None:
+                continue
+
+            if not self._table_has_matching_row(col.references_table, col.references_column, value):
+                raise QueryError(
+                    f"Foreign key violation: {table_name}.{col.name} = {value!r} has no matching "
+                    f"row in {col.references_table}({col.references_column})"
+                )
+
+    def _referencing_foreign_keys(self, table_name: str) -> List[tuple]:
+        """Find every (child_table, child_column, parent_column) that references this table."""
+        return [
+            (other_name, col.name, col.references_column)
+            for other_name, meta in self.table_metadata.items()
+            for col in meta.columns
+            if col.references_table == table_name
+        ]
+
+    def _reject_referenced_row_deletion(self, table_name: str, table_meta, record: 'Record') -> None:
+        """
+        Enforce RESTRICT semantics: refuse to delete a row that other tables
+        still reference via a foreign key.
+        """
+        for child_table, child_column, parent_column in self._referencing_foreign_keys(table_name):
+            parent_index = self._column_index(parent_column, table_meta)
+            parent_value = record.get_values()[parent_index]
+            if parent_value is None:
+                continue
+
+            if self._table_has_matching_row(child_table, child_column, parent_value):
+                raise QueryError(
+                    f"Cannot delete from '{table_name}': still referenced by "
+                    f"{child_table}.{child_column} = {parent_value!r}"
+                )
 
     def _finalize_aggregate_rows(self, rows: List[List[Any]], stmt: SelectStatement) -> List[List[Any]]:
         """Apply ORDER BY/OFFSET/LIMIT to aggregated rows and wrap them as Records."""

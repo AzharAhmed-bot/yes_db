@@ -58,6 +58,7 @@ class TokenType(Enum):
     COMMIT = auto()
     ROLLBACK = auto()
     TRANSACTION = auto()
+    REFERENCES = auto()
 
     # Literals
     INTEGER_LITERAL = auto()
@@ -152,6 +153,7 @@ KEYWORDS = {
     'COMMIT': TokenType.COMMIT,
     'ROLLBACK': TokenType.ROLLBACK,
     'TRANSACTION': TokenType.TRANSACTION,
+    'REFERENCES': TokenType.REFERENCES,
 }
 
 

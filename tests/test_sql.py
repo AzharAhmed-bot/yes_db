@@ -532,6 +532,34 @@ class TestParserCreateTable:
         assert ast.columns[2].type == 'REAL'
 
 
+class TestParserForeignKeys:
+    """Test REFERENCES clause parsing in column definitions."""
+
+    def test_parse_column_with_references(self):
+        ast = parse('CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id))')
+        fk_col = ast.columns[1]
+        assert fk_col.references_table == 'users'
+        assert fk_col.references_column == 'id'
+
+    def test_parse_column_without_references_defaults_none(self):
+        ast = parse('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)')
+        assert ast.columns[0].references_table is None
+        assert ast.columns[1].references_table is None
+
+    def test_parse_primary_key_and_references_together(self):
+        ast = parse(
+            'CREATE TABLE items (id INTEGER PRIMARY KEY REFERENCES products(sku))'
+        )
+        assert ast.columns[0].primary_key is True
+        assert ast.columns[0].references_table == 'products'
+        assert ast.columns[0].references_column == 'sku'
+
+    def test_parse_alter_table_add_column_with_references(self):
+        ast = parse('ALTER TABLE orders ADD COLUMN customer_id INTEGER REFERENCES customers(id)')
+        assert ast.column.references_table == 'customers'
+        assert ast.column.references_column == 'id'
+
+
 class TestParserTransactions:
     """Test BEGIN / COMMIT / ROLLBACK statement parsing."""
 
