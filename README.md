@@ -262,9 +262,12 @@ MIT License - see [LICENSE](LICENSE) file
 
 ## Version
 
-Current version: **0.2.1** (Beta)
+Current version: **0.2.2** (Beta)
 
 ### Changelog
+
+#### v0.2.2
+- **Fix**: `yesdb push` claimed every table in your local `schema.py` was "created" even when the server rejected some of them (e.g. re-pushing after a table already exists). The real per-table result was already shown via engine logs; the misleading summary line is now removed.
 
 #### v0.2.1
 - **Fix**: `yesdb signup`/`yesdb login` default server URL pointed at a dead Azure endpoint (no longer hosted). Now points at the live, self-hosted Cloud instance.

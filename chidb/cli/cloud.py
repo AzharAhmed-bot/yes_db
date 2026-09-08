@@ -325,9 +325,6 @@ def cmd_push(args) -> int:
         if data.get("logs"):
             _print_logs(data["logs"])
 
-        # Summary
-        for table in tables:
-            print(f"  Table '{table.name}' created")
         print(f"\n  Schema synced. {data['executed']} statement(s) pushed.")
         return 0
 

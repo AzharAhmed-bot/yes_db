@@ -269,6 +269,44 @@ class TestPush:
         assert "posts" in out
         assert "2 statement(s) pushed" in out
 
+    def test_push_does_not_claim_success_for_existing_table(self, test_client, tmp_path, capsys):
+        """Re-pushing a schema where one table already exists must not report
+        that table as created — only the tables that actually succeeded."""
+        _signup_user(test_client, tmp_path)
+        mock_req = _patch_requests_with_test_client(test_client)
+
+        with patch("chidb.cli.cloud.requests", mock_req):
+            main(["init", "pushtwice"])
+
+        with open("yesdb/schema.py", "w") as f:
+            f.write(
+                "from chidb.schema import Table, Column, Integer, Text\n\n"
+                "users = Table('users', [\n"
+                "    Column('id', Integer, primary_key=True),\n"
+                "    Column('name', Text),\n"
+                "])\n"
+            )
+
+        with patch("chidb.cli.cloud.requests", mock_req):
+            main(["push"])  # first push creates 'users'
+
+        with open("yesdb/schema.py", "a") as f:
+            f.write(
+                "\nreports = Table('reports', [\n"
+                "    Column('id', Integer, primary_key=True),\n"
+                "])\n"
+            )
+
+        with patch("chidb.cli.cloud.requests", mock_req):
+            result = main(["push"])  # second push: 'users' already exists
+
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "1 statement(s) pushed" in out
+        assert "ERROR" in out
+        assert "reports" in out
+        assert "Table 'users' created" not in out
+
     def test_push_no_project(self, capsys):
         result = main(["push"])
         assert result == 1

@@ -104,7 +104,7 @@ class TestExports:
 
     def test_version(self):
         import chidb
-        assert chidb.__version__ == "0.2.1"
+        assert chidb.__version__ == "0.2.2"
 
     def test_all_list(self):
         import chidb
