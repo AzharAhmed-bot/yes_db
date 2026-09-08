@@ -128,13 +128,44 @@ class TestSelect:
     
     def test_select_specific_columns(self, temp_db_path):
         with YesDB(temp_db_path) as db:
-            db.execute('CREATE TABLE users (id INTEGER, name TEXT)')
-            db.execute("INSERT INTO users VALUES (1, 'Alice')")
-            
-            results = db.execute('SELECT id FROM users')
-            
-            # Should return results (exact format depends on implementation)
-            assert len(results) > 0
+            db.execute('CREATE TABLE users (id INTEGER, name TEXT, age INTEGER)')
+            db.execute("INSERT INTO users VALUES (1, 'Alice', 30)")
+
+            results = db.execute('SELECT name FROM users')
+
+            assert results[0][0].get_values() == ['Alice']
+
+    def test_select_where_filters_correctly(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE users (id INTEGER, name TEXT, age INTEGER)')
+            db.execute("INSERT INTO users VALUES (1, 'Alice', 30)")
+            db.execute("INSERT INTO users VALUES (2, 'Bob', 15)")
+
+            results = db.execute('SELECT * FROM users WHERE age > 20')
+
+            assert len(results) == 1
+            assert results[0][0].get_values() == [1, 'Alice', 30]
+
+    def test_select_where_excludes_non_matching_rows(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE users (id INTEGER, name TEXT, age INTEGER)')
+            db.execute("INSERT INTO users VALUES (1, 'Alice', 30)")
+            db.execute("INSERT INTO users VALUES (2, 'Bob', 15)")
+
+            results = db.execute('SELECT * FROM users WHERE age > 100')
+
+            assert results == []
+
+    def test_select_where_with_specific_columns(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE users (id INTEGER, name TEXT, age INTEGER)')
+            db.execute("INSERT INTO users VALUES (1, 'Alice', 30)")
+            db.execute("INSERT INTO users VALUES (2, 'Bob', 15)")
+
+            results = db.execute('SELECT name FROM users WHERE age > 20')
+
+            assert len(results) == 1
+            assert results[0][0].get_values() == ['Alice']
 
 
 class TestEndToEnd:
@@ -230,6 +261,44 @@ class TestErrorHandling:
         with YesDB(temp_db_path) as db:
             with pytest.raises(Exception):
                 db.execute("INSERT INTO nonexistent VALUES (1)")
+
+
+class TestQueryErrorMessages:
+    """User-facing schema/query errors must raise QueryError with a clear,
+    unsanitized message — these never leak internals, so hiding them helps
+    no one (see chidb.security.sanitize_error_message)."""
+
+    def test_duplicate_table_raises_query_error_with_table_name(self, temp_db_path):
+        from chidb import QueryError
+
+        with YesDB(temp_db_path, debug_mode=True) as db:
+            db.execute('CREATE TABLE users (id INTEGER)')
+            with pytest.raises(QueryError, match="users"):
+                db.execute('CREATE TABLE users (id INTEGER)')
+
+    def test_select_nonexistent_table_raises_query_error(self, temp_db_path):
+        from chidb import QueryError
+
+        with YesDB(temp_db_path, debug_mode=True) as db:
+            with pytest.raises(QueryError, match="ghost"):
+                db.execute('SELECT * FROM ghost')
+
+    def test_query_error_message_survives_non_debug_mode(self, temp_db_path):
+        """Even with debug_mode=False, QueryError messages must not be
+        sanitized away to a generic string."""
+        with YesDB(temp_db_path, debug_mode=False) as db:
+            db.execute('CREATE TABLE users (id INTEGER)')
+            with pytest.raises(ValueError, match="users' already exists"):
+                db.execute('CREATE TABLE users (id INTEGER)')
+
+    def test_syntax_error_message_survives_non_debug_mode(self, temp_db_path):
+        """A SQL syntax typo must show what's actually wrong, not the
+        generic 'An error occurred' fallback for unrecognized error types."""
+        with YesDB(temp_db_path, debug_mode=False) as db:
+            with pytest.raises(ValueError) as exc_info:
+                db.execute('SELCT * FROM users')
+            assert str(exc_info.value) != "An error occurred"
+            assert "SELCT" in str(exc_info.value)
 
 
 class TestPersistence:

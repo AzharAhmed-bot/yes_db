@@ -7,11 +7,11 @@ Backend-as-a-Service for students.
 """
 
 from chidb.api import YesDB, connect
-from chidb.security import SecurityError, PathTraversalError, ResourceLimitError
+from chidb.security import SecurityError, PathTraversalError, ResourceLimitError, QueryError
 from chidb.client import CloudConnection, ExecuteResult
 from chidb.schema import Table, Column, Integer, Text, Real, Float, Blob
 
-__version__ = '0.2.2'
+__version__ = '0.2.3'
 __author__ = 'Azhar'
 __license__ = 'MIT'
 
@@ -30,4 +30,5 @@ __all__ = [
     'SecurityError',
     'PathTraversalError',
     'ResourceLimitError',
+    'QueryError',
 ]

@@ -104,13 +104,13 @@ class TestExports:
 
     def test_version(self):
         import chidb
-        assert chidb.__version__ == "0.2.2"
+        assert chidb.__version__ == "0.2.3"
 
     def test_all_list(self):
         import chidb
         expected = {
             'YesDB', 'connect', 'CloudConnection', 'ExecuteResult',
             'Table', 'Column', 'Integer', 'Text', 'Real', 'Float', 'Blob',
-            'SecurityError', 'PathTraversalError', 'ResourceLimitError',
+            'SecurityError', 'PathTraversalError', 'ResourceLimitError', 'QueryError',
         }
         assert set(chidb.__all__) == expected

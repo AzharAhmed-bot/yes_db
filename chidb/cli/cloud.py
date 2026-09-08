@@ -84,6 +84,41 @@ def _print_logs(logs: list):
         print(f"  {timestamp} - chidb.{component} - {level} - {message}")
 
 
+def _classify_push_result(result: dict) -> str:
+    """Classify one push result as 'created', 'skipped', or 'failed'."""
+    if result["success"]:
+        return "created"
+    if "already exists" in result["message"].lower():
+        return "skipped"
+    return "failed"
+
+
+def _print_push_summary(tables: list, results: list):
+    """Print one clear status line per table, then a one-line summary."""
+    counts = {"created": 0, "skipped": 0, "failed": 0}
+
+    for table, result in zip(tables, results):
+        status = _classify_push_result(result)
+        counts[status] += 1
+
+        if status == "created":
+            print(f"  ✓ {table.name} created")
+        elif status == "skipped":
+            print(f"  • {table.name} already exists (skipped)")
+        else:
+            print(f"  ✗ {table.name} failed: {result['message']}")
+
+    summary_parts = []
+    if counts["created"]:
+        summary_parts.append(f"{counts['created']} created")
+    if counts["skipped"]:
+        summary_parts.append(f"{counts['skipped']} already up to date")
+    if counts["failed"]:
+        summary_parts.append(f"{counts['failed']} failed")
+
+    print(f"\n  Schema synced: {', '.join(summary_parts)}.")
+
+
 # ── Commands ─────────────────────────────────────────────────────
 
 
@@ -321,11 +356,11 @@ def cmd_push(args) -> int:
 
         data = resp.json()
 
-        # Print logs
-        if data.get("logs"):
+        if args.verbose and data.get("logs"):
             _print_logs(data["logs"])
+            print()
 
-        print(f"\n  Schema synced. {data['executed']} statement(s) pushed.")
+        _print_push_summary(tables, data["results"])
         return 0
 
     except requests.ConnectionError:
@@ -472,7 +507,10 @@ def main(args: Optional[list] = None) -> int:
     sp_init.add_argument("db_name", help="Name for the database")
 
     # push
-    subparsers.add_parser("push", help="Push schema.py to the cloud")
+    sp_push = subparsers.add_parser("push", help="Push schema.py to the cloud")
+    sp_push.add_argument(
+        "--verbose", "-v", action="store_true", help="Show detailed engine logs"
+    )
 
     # databases
     subparsers.add_parser("databases", help="List your databases")

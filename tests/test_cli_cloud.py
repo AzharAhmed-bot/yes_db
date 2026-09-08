@@ -265,9 +265,60 @@ class TestPush:
 
         assert result == 0
         out = capsys.readouterr().out
-        assert "users" in out
-        assert "posts" in out
-        assert "2 statement(s) pushed" in out
+        assert "✓ users created" in out
+        assert "✓ posts created" in out
+        assert "2 created" in out
+
+    def test_push_verbose_shows_engine_logs(self, test_client, tmp_path, capsys):
+        _signup_user(test_client, tmp_path)
+        mock_req = _patch_requests_with_test_client(test_client)
+
+        with patch("chidb.cli.cloud.requests", mock_req):
+            main(["init", "verbosetest"])
+
+        with patch("chidb.cli.cloud.requests", mock_req):
+            result = main(["push", "--verbose"])
+
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "chidb.api" in out  # raw engine log line
+        assert "✓ users created" in out
+
+    def test_push_verbose_shows_logs_even_when_statement_fails(self, test_client, tmp_path, capsys):
+        """A failed statement (e.g. table already exists) must still show
+        its engine log line under --verbose, not just the ones that succeed."""
+        _signup_user(test_client, tmp_path)
+        mock_req = _patch_requests_with_test_client(test_client)
+
+        with patch("chidb.cli.cloud.requests", mock_req):
+            main(["init", "verbosefail"])
+        with patch("chidb.cli.cloud.requests", mock_req):
+            main(["push"])
+        capsys.readouterr()
+
+        with patch("chidb.cli.cloud.requests", mock_req):
+            result = main(["push", "--verbose"])  # 'users' already exists this time
+
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "already exists" in out  # the real engine log line, not silence
+        assert "• users already exists (skipped)" in out
+
+    def test_push_quiet_by_default_hides_engine_logs(self, test_client, tmp_path, capsys):
+        _signup_user(test_client, tmp_path)
+        mock_req = _patch_requests_with_test_client(test_client)
+
+        with patch("chidb.cli.cloud.requests", mock_req):
+            main(["init", "quiettest"])
+        capsys.readouterr()  # discard init's own log output
+
+        with patch("chidb.cli.cloud.requests", mock_req):
+            result = main(["push"])
+
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "chidb.api" not in out
+        assert "✓ users created" in out
 
     def test_push_does_not_claim_success_for_existing_table(self, test_client, tmp_path, capsys):
         """Re-pushing a schema where one table already exists must not report
@@ -289,6 +340,7 @@ class TestPush:
 
         with patch("chidb.cli.cloud.requests", mock_req):
             main(["push"])  # first push creates 'users'
+        capsys.readouterr()  # discard first push's output
 
         with open("yesdb/schema.py", "a") as f:
             f.write(
@@ -302,10 +354,10 @@ class TestPush:
 
         assert result == 0
         out = capsys.readouterr().out
-        assert "1 statement(s) pushed" in out
-        assert "ERROR" in out
-        assert "reports" in out
-        assert "Table 'users' created" not in out
+        assert "✓ reports created" in out
+        assert "• users already exists (skipped)" in out
+        assert "1 created, 1 already up to date" in out
+        assert "✓ users created" not in out
 
     def test_push_no_project(self, capsys):
         result = main(["push"])

@@ -6,6 +6,7 @@ Converts tokens into structured AST representations.
 from typing import List, Optional, Any
 from dataclasses import dataclass
 from chidb.sql.lexer import Token, TokenType, Lexer
+from chidb.security import QueryError
 
 
 # AST Node Classes
@@ -158,8 +159,13 @@ AGGREGATE_TOKENS = {
 }
 
 
-class ParseError(Exception):
-    """Exception raised for parsing errors."""
+class ParseError(QueryError):
+    """
+    Exception raised for parsing errors.
+
+    A QueryError subclass: the message only ever echoes back tokens from
+    the caller's own SQL, so it's always safe to show as-is.
+    """
     pass
 
 

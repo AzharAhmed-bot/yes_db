@@ -23,7 +23,8 @@ from chidb.security import (
     check_table_count,
     check_column_count,
     sanitize_error_message,
-    SecurityError
+    SecurityError,
+    QueryError
 )
 
 
@@ -233,10 +234,13 @@ class YesDB:
             if isinstance(ast, SelectStatement) and self._is_aggregate_select(ast):
                 return self._execute_select_aggregate(ast)
 
-            # Handle SELECT with ORDER BY/LIMIT
-            if isinstance(ast, SelectStatement) and (ast.order_by or ast.limit or ast.offset or ast.distinct):
+            # Handle every other SELECT (WHERE/ORDER BY/LIMIT/OFFSET/DISTINCT,
+            # or a bare SELECT *). All routed through the same Python-level
+            # path — the codegen/DBM bytecode path never actually resolved
+            # WHERE column values or projected specific columns correctly.
+            if isinstance(ast, SelectStatement):
                 return self._execute_select_advanced(ast)
-            
+
             # Optimization
             ast = self.optimizer.optimize(ast)
             
@@ -300,7 +304,7 @@ class YesDB:
             validate_column_name(col.name)
 
         if table_name in self.tables:
-            raise ValueError(f"Table '{table_name}' already exists")
+            raise QueryError(f"Table '{table_name}' already exists")
         
         # Create a new B-tree for this table
         btree = BTree(self.pager)
@@ -343,7 +347,7 @@ class YesDB:
         
         table_name = stmt.table
         if table_name not in self.tables:
-            raise ValueError(f"Table '{table_name}' does not exist")
+            raise QueryError(f"Table '{table_name}' does not exist")
         
         root_page = self.tables[table_name]
         table_meta = self.table_metadata.get(table_name)
@@ -392,7 +396,7 @@ class YesDB:
         """
         table_name = stmt.table
         if table_name not in self.tables:
-            raise ValueError(f"Table '{table_name}' does not exist")
+            raise QueryError(f"Table '{table_name}' does not exist")
         
         root_page = self.tables[table_name]
         table_meta = self.table_metadata.get(table_name)
@@ -477,7 +481,7 @@ class YesDB:
         
         table_name = stmt.table
         if table_name not in self.tables:
-            raise ValueError(f"Table '{table_name}' does not exist")
+            raise QueryError(f"Table '{table_name}' does not exist")
         
         root_page = self.tables[table_name]
         table_meta = self.table_metadata.get(table_name)
@@ -560,7 +564,7 @@ class YesDB:
         """
         table_name = stmt.table
         if table_name not in self.tables:
-            raise ValueError(f"Table '{table_name}' does not exist")
+            raise QueryError(f"Table '{table_name}' does not exist")
 
         table_meta = self.table_metadata.get(table_name)
         btree = BTree(self.pager, self.tables[table_name])
@@ -614,7 +618,7 @@ class YesDB:
             elif column in key_lookup:
                 row.append(key_lookup[column])
             else:
-                raise ValueError(
+                raise QueryError(
                     f"Column '{column}' must appear in GROUP BY or be an aggregate function"
                 )
         return row
@@ -646,16 +650,16 @@ class YesDB:
         if call.function == 'MAX':
             return max(non_null_values)
 
-        raise ValueError(f"Unsupported aggregate function: {call.function}")
+        raise QueryError(f"Unsupported aggregate function: {call.function}")
 
     def _column_index(self, name: str, table_meta: Optional[TableMetadata]) -> int:
         """Find a column's position in the table schema."""
         if not table_meta:
-            raise ValueError(f"No metadata for column '{name}'")
+            raise QueryError(f"No metadata for column '{name}'")
         for index, col_def in enumerate(table_meta.columns):
             if col_def.name == name:
                 return index
-        raise ValueError(f"Unknown column: {name}")
+        raise QueryError(f"Unknown column: {name}")
 
     def _finalize_aggregate_rows(self, rows: List[List[Any]], stmt: SelectStatement) -> List[List[Any]]:
         """Apply ORDER BY/OFFSET/LIMIT to aggregated rows and wrap them as Records."""
@@ -686,7 +690,7 @@ class YesDB:
         table_name = stmt.table
         
         if table_name not in self.tables:
-            raise ValueError(f"Table '{table_name}' does not exist")
+            raise QueryError(f"Table '{table_name}' does not exist")
         
         # Remove from metadata
         del self.table_metadata[table_name]
@@ -705,7 +709,7 @@ class YesDB:
         table_name = stmt.table
         
         if table_name not in self.tables:
-            raise ValueError(f"Table '{table_name}' does not exist")
+            raise QueryError(f"Table '{table_name}' does not exist")
         
         table_meta = self.table_metadata[table_name]
         

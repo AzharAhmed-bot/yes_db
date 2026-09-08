@@ -11,6 +11,7 @@ from chidb.sql.parser import (
 )
 from chidb.dbm import Instruction, Opcode
 from chidb.log import get_logger, log_sql_codegen
+from chidb.security import QueryError
 
 
 class CodeGenerator:
@@ -37,7 +38,7 @@ class CodeGenerator:
     def get_table_root(self, table_name: str) -> int:
         """Get the root page for a table."""
         if table_name not in self.table_registry:
-            raise ValueError(f"Unknown table: {table_name}")
+            raise QueryError(f"Unknown table: {table_name}")
         return self.table_registry[table_name]
     
     def generate(self, ast: ASTNode) -> List[Instruction]:

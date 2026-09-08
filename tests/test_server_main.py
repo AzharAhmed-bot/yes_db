@@ -340,9 +340,13 @@ class TestPushSchema:
         data = resp.json()
         assert data["executed"] == 2
         assert len(data["logs"]) > 0
+        assert data["results"] == [
+            {"success": True, "message": "created"},
+            {"success": True, "message": "created"},
+        ]
 
     def test_push_with_error(self, client, auth_headers, test_db):
-        """If one statement fails, it should be logged but others still run."""
+        """If one statement fails, it should be reported but others still run."""
         resp = client.post(
             f"/api/v1/databases/{test_db}/push",
             json={
@@ -356,9 +360,44 @@ class TestPushSchema:
         )
         data = resp.json()
         assert data["executed"] == 2  # 2 succeeded
-        # Should have an error log for the failed statement
-        error_logs = [l for l in data["logs"] if l["level"] == "ERROR"]
-        assert len(error_logs) >= 1
+        assert [r["success"] for r in data["results"]] == [True, False, True]
+        assert data["results"][1]["message"]  # some non-empty failure reason
+
+    def test_push_reports_already_exists_clearly(self, client, auth_headers, test_db):
+        """Re-pushing an existing table must report a clear reason, not a
+        generic sanitized message."""
+        client.post(
+            f"/api/v1/databases/{test_db}/execute",
+            json={"sql": "CREATE TABLE users (id INTEGER)"},
+            headers=auth_headers,
+        )
+        resp = client.post(
+            f"/api/v1/databases/{test_db}/push",
+            json={"statements": ["CREATE TABLE users (id INTEGER)"]},
+            headers=auth_headers,
+        )
+        data = resp.json()
+        assert data["executed"] == 0
+        assert data["results"] == [
+            {"success": False, "message": "Table 'users' already exists"}
+        ]
+
+    def test_push_preserves_logs_for_failed_statements(self, client, auth_headers, test_db):
+        """Logs captured before a statement fails (e.g. the engine's own
+        ERROR log entry) must still reach the response, not be dropped."""
+        client.post(
+            f"/api/v1/databases/{test_db}/execute",
+            json={"sql": "CREATE TABLE users (id INTEGER)"},
+            headers=auth_headers,
+        )
+        resp = client.post(
+            f"/api/v1/databases/{test_db}/push",
+            json={"statements": ["CREATE TABLE users (id INTEGER)"]},
+            headers=auth_headers,
+        )
+        data = resp.json()
+        assert len(data["logs"]) > 0
+        assert any("already exists" in log["message"] for log in data["logs"])
 
 
 # ── List tables ──────────────────────────────────────────────────

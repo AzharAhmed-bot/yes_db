@@ -24,6 +24,18 @@ class ResourceLimitError(SecurityError):
     pass
 
 
+class QueryError(ValueError):
+    """
+    Raised for expected, user-actionable query/schema errors
+    (e.g. unknown table, duplicate table, unknown column).
+
+    Unlike a bare ValueError, the message is always safe to show to the
+    user as-is — it never contains internal state, only names the caller
+    already provided in their own SQL.
+    """
+    pass
+
+
 # Configuration for resource limits
 class SecurityConfig:
     """Security configuration with sensible defaults."""
@@ -224,6 +236,11 @@ def sanitize_error_message(error: Exception, debug_mode: bool = False) -> str:
         Sanitized error message
     """
     if debug_mode:
+        return str(error)
+
+    # QueryError messages are always safe to show as-is — they only ever
+    # name a table/column the caller already supplied in their own SQL.
+    if isinstance(error, QueryError):
         return str(error)
 
     # Generic messages for production

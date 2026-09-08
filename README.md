@@ -262,9 +262,15 @@ MIT License - see [LICENSE](LICENSE) file
 
 ## Version
 
-Current version: **0.2.2** (Beta)
+Current version: **0.2.3** (Beta)
 
 ### Changelog
+
+#### v0.2.3
+- **Fix**: `SELECT ... WHERE ...` (without ORDER BY/LIMIT/DISTINCT/GROUP BY) silently returned wrong data — the WHERE clause never actually resolved column values, and column projection (`SELECT col FROM t`) returned full rows instead of the requested columns. Both now go through the same correct execution path as every other SELECT variant.
+- **Fix**: Error messages were being needlessly hidden in production mode — `sanitize_error_message()` collapsed *every* error down to generic strings like "Invalid input" or "An error occurred," including safe, expected ones (table already exists, unknown table, SQL syntax errors). Added a `QueryError` class for errors that only ever echo back names/tokens the caller already supplied — these now show their real message instead of being sanitized away.
+- **Improved**: `yesdb push` output redesigned — one line per table with a real status (created / already exists, skipped / failed: reason) and an accurate summary, instead of a misleading "Table 'X' created" claim for every table regardless of outcome. Raw engine logs moved behind a new `--verbose`/`-v` flag.
+- **Fix**: logs captured before a statement failed during `push` were silently dropped instead of reaching `--verbose` output.
 
 #### v0.2.2
 - **Fix**: `yesdb push` claimed every table in your local `schema.py` was "created" even when the server rejected some of them (e.g. re-pushing after a table already exists). The real per-table result was already shown via engine logs; the misleading summary line is now removed.

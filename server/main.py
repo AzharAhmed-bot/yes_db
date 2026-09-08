@@ -79,6 +79,10 @@ def capture_logs(func):
     """
     Run a function while capturing all chidb.* log output.
     Returns (result, logs).
+
+    If func raises, the logs captured up to that point are attached to the
+    exception as `.captured_logs` before it propagates, so callers who
+    continue past individual failures (e.g. push_schema) don't lose them.
     """
     handler = LogCaptureHandler()
     formatter = logging.Formatter("%(asctime)s", datefmt="%Y-%m-%d %H:%M:%S")
@@ -92,6 +96,9 @@ def capture_logs(func):
 
     try:
         result = func()
+    except Exception as e:
+        e.captured_logs = handler.records
+        raise
     finally:
         chidb_logger.removeHandler(handler)
         chidb_logger.setLevel(original_level)
@@ -191,8 +198,14 @@ class PushRequest(BaseModel):
     statements: List[str]
 
 
+class StatementResult(BaseModel):
+    success: bool
+    message: str
+
+
 class PushResponse(BaseModel):
     executed: int
+    results: List[StatementResult]
     logs: List[Dict[str, str]]
 
 
@@ -309,6 +322,7 @@ def push_schema(db_name: str, req: PushRequest, user: User = Depends(get_current
 
     def _push_all():
         all_logs: List[Dict[str, str]] = []
+        results: List[StatementResult] = []
         executed_count = 0
 
         for sql in req.statements:
@@ -316,23 +330,18 @@ def push_schema(db_name: str, req: PushRequest, user: User = Depends(get_current
                 _, logs = capture_logs(lambda s=sql: db.execute(s))
                 all_logs.extend(logs)
                 executed_count += 1
+                results.append(StatementResult(success=True, message="created"))
             except Exception as e:
-                all_logs.append(
-                    {
-                        "level": "ERROR",
-                        "component": "server",
-                        "message": f"Failed: {sql} — {str(e)}",
-                        "timestamp": "",
-                    }
-                )
+                all_logs.extend(getattr(e, "captured_logs", []))
+                results.append(StatementResult(success=False, message=str(e)))
 
-        return executed_count, all_logs
+        return executed_count, results, all_logs
 
     try:
-        executed_count, all_logs = _run_guarded(pool_key, _push_all)
+        executed_count, results, all_logs = _run_guarded(pool_key, _push_all)
     except QueryTimeoutError as e:
         raise HTTPException(status_code=504, detail=str(e))
-    return PushResponse(executed=executed_count, logs=all_logs)
+    return PushResponse(executed=executed_count, results=results, logs=all_logs)
 
 
 @app.get("/api/v1/databases/{db_name}/tables", response_model=TablesResponse)
