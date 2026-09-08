@@ -146,10 +146,11 @@ YesDB> SELECT * FROM users;
 
 ## Features
 
-- **SQL Support**: CREATE, SELECT, INSERT, UPDATE, DELETE, DROP, ALTER TABLE
+- **SQL Support**: CREATE/DROP TABLE, CREATE/DROP INDEX, SELECT, INSERT, UPDATE, DELETE, ALTER TABLE
 - **Data Types**: INTEGER, TEXT, REAL, BLOB
 - **Query Features**: WHERE, ORDER BY, LIMIT, OFFSET, DISTINCT, INNER/LEFT JOIN
 - **B-Tree Storage**: Efficient indexing and data retrieval
+- **Secondary Indexes**: `CREATE INDEX` accelerates equality lookups on non-primary-key columns
 - **No Dependencies**: Pure Python implementation (local mode)
 - **Cloud BaaS**: Host your database remotely with a single command
 - **Schema DSL**: Define tables in Python, push to cloud
@@ -187,6 +188,10 @@ DELETE FROM users WHERE age < 18
 
 -- Alter table
 ALTER TABLE users ADD COLUMN country TEXT
+
+-- Secondary indexes (speeds up equality WHERE lookups)
+CREATE INDEX idx_users_email ON users (email)
+DROP INDEX idx_users_email
 
 -- Drop table
 DROP TABLE users
@@ -268,9 +273,12 @@ MIT License - see [LICENSE](LICENSE) file
 
 ## Version
 
-Current version: **0.3.0** (Beta)
+Current version: **0.4.0** (Beta)
 
 ### Changelog
+
+#### v0.4.0
+- **New**: `CREATE INDEX name ON table (column)` / `DROP INDEX name` — secondary indexes that accelerate `column = value` WHERE lookups from a full table scan down to a direct lookup. Implemented as an in-memory index (the hand-rolled B-tree only supports integer keys), automatically rebuilt when a database is reopened and kept in sync across INSERT/UPDATE/DELETE. `DROP TABLE` cascades to drop any indexes defined on it.
 
 #### v0.3.0
 - **New**: `JOIN` support — `INNER JOIN` (default) and `LEFT [OUTER] JOIN`, chainable across multiple tables, with `table.column` qualified references in `SELECT`, `ON`, `WHERE`, and `ORDER BY`. Unqualified column names resolve automatically when unambiguous across the joined tables, and raise a clear error when they're not. Not yet supported together with `GROUP BY`/aggregate functions.

@@ -53,6 +53,7 @@ class TokenType(Enum):
     INNER = auto()
     LEFT = auto()
     OUTER = auto()
+    INDEX = auto()
 
     # Literals
     INTEGER_LITERAL = auto()
@@ -142,6 +143,7 @@ KEYWORDS = {
     'INNER': TokenType.INNER,
     'LEFT': TokenType.LEFT,
     'OUTER': TokenType.OUTER,
+    'INDEX': TokenType.INDEX,
 }
 
 

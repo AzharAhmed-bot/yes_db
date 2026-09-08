@@ -11,7 +11,7 @@ from chidb.btree import BTree
 from chidb.dbm import DatabaseMachine
 from chidb.record import Record
 from chidb.sql.lexer import Lexer
-from chidb.sql.parser import Parser, CreateTableStatement, UpdateStatement, DeleteStatement, DropTableStatement, AlterTableStatement, ColumnDef, SelectStatement, AggregateCall, JoinClause, BinaryOp, Literal, Identifier
+from chidb.sql.parser import Parser, CreateTableStatement, InsertStatement, UpdateStatement, DeleteStatement, DropTableStatement, AlterTableStatement, CreateIndexStatement, DropIndexStatement, ColumnDef, SelectStatement, AggregateCall, JoinClause, BinaryOp, Literal, Identifier
 from chidb.sql.optimizer import Optimizer
 from chidb.sql.codegen import CodeGenerator
 from chidb.log import get_logger
@@ -44,6 +44,7 @@ class TableMetadata:
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
         return {
+            'kind': 'table',
             'name': self.name,
             'root_page': self.root_page,
             'columns': [
@@ -57,7 +58,7 @@ class TableMetadata:
             'primary_key_column': self.primary_key_column,
             'next_auto_increment': self.next_auto_increment
         }
-    
+
     @staticmethod
     def from_dict(data: dict) -> 'TableMetadata':
         """Create from dictionary."""
@@ -76,6 +77,23 @@ class TableMetadata:
             primary_key_column=data.get('primary_key_column'),
             next_auto_increment=data.get('next_auto_increment', 1)
         )
+
+
+@dataclass
+class IndexMetadata:
+    """Metadata about a secondary index: an in-memory value -> row-key map, rebuilt on load."""
+    name: str
+    table: str
+    column: str
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+        return {'kind': 'index', 'name': self.name, 'table': self.table, 'column': self.column}
+
+    @staticmethod
+    def from_dict(data: dict) -> 'IndexMetadata':
+        """Create from dictionary."""
+        return IndexMetadata(name=data['name'], table=data['table'], column=data['column'])
 
 
 class YesDB:
@@ -116,10 +134,16 @@ class YesDB:
         
         # Table metadata: maps table name -> TableMetadata
         self.table_metadata: Dict[str, TableMetadata] = {}
-        
+
         # Legacy tables dict for backward compatibility
         self.tables: Dict[str, int] = {}
-        
+
+        # Secondary indexes: maps index name -> IndexMetadata (definition)
+        # and index name -> {column_value: [btree_keys]} (in-memory data,
+        # rebuilt from the table on load since it isn't itself persisted).
+        self.indexes: Dict[str, IndexMetadata] = {}
+        self._index_data: Dict[str, Dict[Any, List[int]]] = {}
+
         # Initialize system (load existing tables if any)
         self._initialize()
     
@@ -146,21 +170,29 @@ class YesDB:
         self.catalog_root = SYSTEM_CATALOG_PAGE
         self.catalog_btree = BTree(self.pager, self.catalog_root)
         
-        # Scan the catalog and load all table metadata
+        # Scan the catalog and load all table and index metadata
         try:
             catalog_records = self.catalog_btree.scan()
-            
+
             for key, record in catalog_records:
-                # Record contains JSON-serialized table metadata
+                # Record contains JSON-serialized table or index metadata
                 json_data = record.get_value(0)
-                if json_data:
-                    metadata_dict = json.loads(json_data)
+                if not json_data:
+                    continue
+
+                metadata_dict = json.loads(json_data)
+
+                if metadata_dict.get('kind') == 'index':
+                    index_meta = IndexMetadata.from_dict(metadata_dict)
+                    self.indexes[index_meta.name] = index_meta
+                    self.logger.info(f"Loaded index '{index_meta.name}' from catalog")
+                else:
                     metadata = TableMetadata.from_dict(metadata_dict)
-                    
                     self.table_metadata[metadata.name] = metadata
                     self.tables[metadata.name] = metadata.root_page
-                    
                     self.logger.info(f"Loaded table '{metadata.name}' from catalog")
+
+            self._rebuild_all_indexes()
         except Exception as e:
             self.logger.warning(f"Could not load system catalog: {e}")
             # If catalog is corrupt, start fresh
@@ -225,10 +257,16 @@ class YesDB:
             # Handle DROP TABLE
             if isinstance(ast, DropTableStatement):
                 return self._execute_drop_table(ast)
-            
+
             # Handle ALTER TABLE
             if isinstance(ast, AlterTableStatement):
                 return self._execute_alter_table(ast)
+
+            # Handle CREATE INDEX / DROP INDEX
+            if isinstance(ast, CreateIndexStatement):
+                return self._execute_create_index(ast)
+            if isinstance(ast, DropIndexStatement):
+                return self._execute_drop_index(ast)
             
             # Handle SELECT with GROUP BY or aggregate functions
             if isinstance(ast, SelectStatement) and self._is_aggregate_select(ast):
@@ -271,6 +309,12 @@ class YesDB:
             # This ensures subsequent operations use the correct root pages
             if metadata_changed:
                 self.dbm.btrees.clear()
+
+            # This fallback path currently only handles INSERT (every other
+            # statement is special-cased above), so keep any indexes on the
+            # affected table in sync.
+            if isinstance(ast, InsertStatement) and self.indexes:
+                self._maintain_indexes_for_table(ast.table)
 
             return results
 
@@ -384,7 +428,10 @@ class YesDB:
                 new_record = Record(values)
                 btree.update(key, new_record)
                 updated_count += 1
-        
+
+        if updated_count and self.indexes:
+            self._maintain_indexes_for_table(table_name)
+
         self.logger.info(f"Updated {updated_count} rows in '{table_name}'")
         return []
     
@@ -421,7 +468,10 @@ class YesDB:
         # Delete the keys
         for key in keys_to_delete:
             btree.delete(key)
-        
+
+        if keys_to_delete and self.indexes:
+            self._maintain_indexes_for_table(table_name)
+
         self.logger.info(f"Deleted {len(keys_to_delete)} rows from '{table_name}'")
         return []
     
@@ -489,10 +539,18 @@ class YesDB:
         root_page = self.tables[table_name]
         table_meta = self.table_metadata.get(table_name)
         btree = BTree(self.pager, root_page)
-        
-        # Scan all records
-        all_records = btree.scan()
-        
+
+        # Use a secondary index for a simple `column = value` WHERE clause
+        # when one is available, instead of a full table scan.
+        index_match = self._find_index_for_where(table_name, stmt.where)
+        if index_match:
+            index_metadata, value = index_match
+            keys = self._index_data.get(index_metadata.name, {}).get(value, [])
+            all_records = [(key, btree.search(key)) for key in keys]
+            all_records = [(key, record) for key, record in all_records if record is not None]
+        else:
+            all_records = btree.scan()
+
         # Convert to result rows
         results = []
         for key, record in all_records:
@@ -911,10 +969,15 @@ class YesDB:
         # Remove from metadata
         del self.table_metadata[table_name]
         del self.tables[table_name]
-        
+
+        # Cascade: drop any indexes defined on this table
+        for index_name in [name for name, meta in self.indexes.items() if meta.table == table_name]:
+            del self.indexes[index_name]
+            self._index_data.pop(index_name, None)
+
         # Update catalog
         self._save_all_metadata()
-        
+
         self.logger.info(f"Dropped table '{table_name}'")
         return []
     
@@ -937,9 +1000,95 @@ class YesDB:
             self._save_all_metadata()
             
             self.logger.info(f"Added column '{stmt.column.name}' to table '{table_name}'")
-        
+
         return []
-    
+
+    def _execute_create_index(self, stmt: CreateIndexStatement) -> List[List[Any]]:
+        """
+        Execute CREATE INDEX statement.
+
+        Builds an in-memory {value: [row_keys]} index over the table, used
+        to accelerate equality WHERE lookups instead of a full table scan.
+        """
+        if stmt.index_name in self.indexes:
+            raise QueryError(f"Index '{stmt.index_name}' already exists")
+
+        if stmt.table not in self.tables:
+            raise QueryError(f"Table '{stmt.table}' does not exist")
+
+        table_meta = self.table_metadata[stmt.table]
+        if not any(col.name == stmt.column for col in table_meta.columns):
+            raise QueryError(f"Unknown column '{stmt.column}' on table '{stmt.table}'")
+
+        metadata = IndexMetadata(name=stmt.index_name, table=stmt.table, column=stmt.column)
+        self.indexes[stmt.index_name] = metadata
+        self._build_index(metadata)
+        self._save_all_metadata()
+
+        self.logger.info(f"Created index '{stmt.index_name}' on {stmt.table}({stmt.column})")
+        return []
+
+    def _execute_drop_index(self, stmt: DropIndexStatement) -> List[List[Any]]:
+        """Execute DROP INDEX statement."""
+        if stmt.index_name not in self.indexes:
+            raise QueryError(f"Index '{stmt.index_name}' does not exist")
+
+        del self.indexes[stmt.index_name]
+        self._index_data.pop(stmt.index_name, None)
+        self._save_all_metadata()
+
+        self.logger.info(f"Dropped index '{stmt.index_name}'")
+        return []
+
+    def _build_index(self, metadata: IndexMetadata) -> None:
+        """(Re)build one index's in-memory value -> [row_keys] map by scanning its table."""
+        btree = BTree(self.pager, self.tables[metadata.table])
+        table_meta = self.table_metadata[metadata.table]
+        column_index = self._column_index(metadata.column, table_meta)
+
+        index_map: Dict[Any, List[int]] = {}
+        for key, record in btree.scan():
+            value = record.get_values()[column_index]
+            index_map.setdefault(value, []).append(key)
+
+        self._index_data[metadata.name] = index_map
+
+    def _rebuild_all_indexes(self) -> None:
+        """Rebuild every index's in-memory data, e.g. after loading the catalog."""
+        for metadata in self.indexes.values():
+            self._build_index(metadata)
+
+    def _maintain_indexes_for_table(self, table_name: str) -> None:
+        """Refresh every index defined on a table after its data changed."""
+        for metadata in self.indexes.values():
+            if metadata.table == table_name:
+                self._build_index(metadata)
+
+    def _find_index_for_where(
+        self, table_name: str, where_expr: Optional[Any]
+    ) -> Optional[tuple]:
+        """
+        If WHERE is a simple `column = literal` on an indexed column of this
+        table, return (IndexMetadata, value); otherwise None.
+        """
+        if where_expr is None:
+            return None
+        if not isinstance(where_expr, BinaryOp) or where_expr.operator != '=':
+            return None
+        if not isinstance(where_expr.left, Identifier) or not isinstance(where_expr.right, Literal):
+            return None
+
+        for metadata in self.indexes.values():
+            if metadata.table == table_name and metadata.column == where_expr.left.name:
+                return metadata, where_expr.right.value
+
+        return None
+
+    def get_index_names(self) -> List[str]:
+        """Get list of index names."""
+        return list(self.indexes.keys())
+
+
     def close(self) -> None:
         """Close the database."""
         # Save all table metadata before closing
@@ -949,30 +1098,27 @@ class YesDB:
         self.logger.info(f"Closed database '{self.filename}'")
     
     def _save_all_metadata(self) -> None:
-        """Save all table metadata to catalog."""
+        """Save all table and index metadata to catalog."""
         # Clear catalog and rewrite all metadata
         # This ensures auto-increment counters are saved
-        
-        # For simplicity, we'll just update existing entries
-        # A full implementation would rebuild the catalog
-        
+
         try:
-            # Re-save each table's metadata
+            # Re-save each table's/index's metadata
             catalog_records = self.catalog_btree.scan()
-            
+
             # Delete all existing catalog entries
             for key, _ in catalog_records:
                 self.catalog_btree.delete(key)
-            
-            # Re-insert all current metadata
-            for i, (table_name, metadata) in enumerate(self.table_metadata.items()):
-                metadata_dict = metadata.to_dict()
-                json_data = json.dumps(metadata_dict)
+
+            # Re-insert all current metadata (tables, then indexes)
+            entries = list(self.table_metadata.values()) + list(self.indexes.values())
+            for i, metadata in enumerate(entries):
+                json_data = json.dumps(metadata.to_dict())
                 record = Record([json_data])
                 self.catalog_btree.insert(i + 1, record)
-            
+
             self.pager.flush()
-            self.logger.info("Saved all table metadata to catalog")
+            self.logger.info("Saved all table/index metadata to catalog")
         except Exception as e:
             self.logger.error(f"Error saving metadata: {e}")
     

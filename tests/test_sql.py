@@ -6,8 +6,9 @@ import pytest
 from chidb.sql.lexer import Lexer, Token, TokenType, tokenize
 from chidb.sql.parser import (
     Parser, parse, ParseError,
-    SelectStatement, InsertStatement, CreateTableStatement,
-    BinaryOp, Literal, Identifier, ColumnDef, AggregateCall, JoinClause
+    SelectStatement, InsertStatement, CreateTableStatement, DropTableStatement,
+    BinaryOp, Literal, Identifier, ColumnDef, AggregateCall, JoinClause,
+    CreateIndexStatement, DropIndexStatement
 )
 
 
@@ -529,6 +530,30 @@ class TestParserCreateTable:
         assert ast.columns[0].type == 'INTEGER'
         assert ast.columns[1].type == 'TEXT'
         assert ast.columns[2].type == 'REAL'
+
+
+class TestParserCreateDropIndex:
+    """Test CREATE INDEX and DROP INDEX statement parsing."""
+
+    def test_parse_create_index(self):
+        ast = parse('CREATE INDEX idx_users_name ON users (name)')
+        assert isinstance(ast, CreateIndexStatement)
+        assert ast.index_name == 'idx_users_name'
+        assert ast.table == 'users'
+        assert ast.column == 'name'
+
+    def test_parse_drop_index(self):
+        ast = parse('DROP INDEX idx_users_name')
+        assert isinstance(ast, DropIndexStatement)
+        assert ast.index_name == 'idx_users_name'
+
+    def test_create_table_still_parses(self):
+        ast = parse('CREATE TABLE users (id INTEGER PRIMARY KEY)')
+        assert isinstance(ast, CreateTableStatement)
+
+    def test_drop_table_still_parses(self):
+        ast = parse('DROP TABLE users')
+        assert isinstance(ast, DropTableStatement)
 
 
 class TestParserExpressions:

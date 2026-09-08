@@ -107,6 +107,26 @@ class AlterTableStatement(ASTNode):
 
 
 @dataclass
+class CreateIndexStatement(ASTNode):
+    """CREATE INDEX statement AST node."""
+    index_name: str
+    table: str
+    column: str
+
+    def __repr__(self) -> str:
+        return f"CreateIndexStatement(index_name={self.index_name}, table={self.table}, column={self.column})"
+
+
+@dataclass
+class DropIndexStatement(ASTNode):
+    """DROP INDEX statement AST node."""
+    index_name: str
+
+    def __repr__(self) -> str:
+        return f"DropIndexStatement(index_name={self.index_name})"
+
+
+@dataclass
 class ColumnDef:
     """Column definition in CREATE TABLE."""
     name: str
@@ -244,12 +264,16 @@ class Parser:
         elif self.match(TokenType.INSERT):
             return self.parse_insert()
         elif self.match(TokenType.CREATE):
+            if self.peek() and self.peek().type == TokenType.INDEX:
+                return self.parse_create_index()
             return self.parse_create_table()
         elif self.match(TokenType.UPDATE):
             return self.parse_update()
         elif self.match(TokenType.DELETE):
             return self.parse_delete()
         elif self.match(TokenType.DROP):
+            if self.peek() and self.peek().type == TokenType.INDEX:
+                return self.parse_drop_index()
             return self.parse_drop_table()
         elif self.match(TokenType.ALTER):
             return self.parse_alter_table()
@@ -481,6 +505,41 @@ class Parser:
         
         return CreateTableStatement(table=table, columns=columns)
     
+    def parse_create_index(self) -> CreateIndexStatement:
+        """
+        Parse CREATE INDEX statement.
+
+        Grammar:
+        CREATE INDEX index_name ON table (column)
+        """
+        self.expect(TokenType.CREATE)
+        self.expect(TokenType.INDEX)
+
+        index_name = self.expect(TokenType.IDENTIFIER).value
+
+        self.expect(TokenType.ON)
+        table = self.expect(TokenType.IDENTIFIER).value
+
+        self.expect(TokenType.LPAREN)
+        column = self.expect(TokenType.IDENTIFIER).value
+        self.expect(TokenType.RPAREN)
+
+        return CreateIndexStatement(index_name=index_name, table=table, column=column)
+
+    def parse_drop_index(self) -> DropIndexStatement:
+        """
+        Parse DROP INDEX statement.
+
+        Grammar:
+        DROP INDEX index_name
+        """
+        self.expect(TokenType.DROP)
+        self.expect(TokenType.INDEX)
+
+        index_name = self.expect(TokenType.IDENTIFIER).value
+
+        return DropIndexStatement(index_name=index_name)
+
     def parse_update(self) -> UpdateStatement:
         """
         Parse UPDATE statement.

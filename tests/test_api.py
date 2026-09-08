@@ -526,3 +526,98 @@ class TestJoins:
             shop_db.execute(
                 'SELECT COUNT(*) FROM orders JOIN users ON orders.user_id = users.id GROUP BY users.name'
             )
+
+
+class TestSecondaryIndexes:
+    """Test CREATE INDEX / DROP INDEX and index-accelerated equality lookups."""
+
+    @pytest.fixture
+    def users_db(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)')
+            for i in range(1, 6):
+                db.execute(f"INSERT INTO users VALUES ({i}, 'user{i}', {20 + i})")
+            yield db
+
+    def test_create_index_registers_name(self, users_db):
+        users_db.execute('CREATE INDEX idx_name ON users (name)')
+        assert users_db.get_index_names() == ['idx_name']
+
+    def test_create_duplicate_index_raises(self, users_db):
+        users_db.execute('CREATE INDEX idx_name ON users (name)')
+        with pytest.raises(ValueError, match="already exists"):
+            users_db.execute('CREATE INDEX idx_name ON users (age)')
+
+    def test_create_index_on_missing_table_raises(self, users_db):
+        with pytest.raises(ValueError):
+            users_db.execute('CREATE INDEX idx_x ON ghosts (name)')
+
+    def test_create_index_on_missing_column_raises(self, users_db):
+        with pytest.raises(ValueError):
+            users_db.execute('CREATE INDEX idx_x ON users (nonexistent)')
+
+    def test_indexed_equality_lookup_returns_correct_row(self, users_db):
+        users_db.execute('CREATE INDEX idx_name ON users (name)')
+        results = users_db.execute("SELECT * FROM users WHERE name = 'user3'")
+        assert _row_values(results) == [[3, 'user3', 23]]
+
+    def test_indexed_lookup_does_not_full_scan(self, users_db, monkeypatch):
+        from chidb.btree import BTree
+
+        users_db.execute('CREATE INDEX idx_name ON users (name)')
+
+        def guarded_scan(self):
+            raise AssertionError("full table scan happened even though an index should have been used")
+
+        monkeypatch.setattr(BTree, 'scan', guarded_scan)
+        results = users_db.execute("SELECT * FROM users WHERE name = 'user3'")
+        assert _row_values(results) == [[3, 'user3', 23]]
+
+    def test_non_indexed_where_still_works(self, users_db):
+        users_db.execute('CREATE INDEX idx_name ON users (name)')
+        results = users_db.execute('SELECT * FROM users WHERE age > 23')
+        assert _row_values(results) == [[4, 'user4', 24], [5, 'user5', 25]]
+
+    def test_index_reflects_update(self, users_db):
+        users_db.execute('CREATE INDEX idx_name ON users (name)')
+        users_db.execute("UPDATE users SET name = 'renamed' WHERE id = 3")
+        assert _row_values(users_db.execute("SELECT * FROM users WHERE name = 'user3'")) == []
+        assert _row_values(users_db.execute("SELECT * FROM users WHERE name = 'renamed'")) == [
+            [3, 'renamed', 23]
+        ]
+
+    def test_index_reflects_delete(self, users_db):
+        users_db.execute('CREATE INDEX idx_name ON users (name)')
+        users_db.execute('DELETE FROM users WHERE id = 1')
+        assert _row_values(users_db.execute("SELECT * FROM users WHERE name = 'user1'")) == []
+
+    def test_index_reflects_insert(self, users_db):
+        users_db.execute('CREATE INDEX idx_name ON users (name)')
+        users_db.execute("INSERT INTO users VALUES (6, 'user6', 26)")
+        assert _row_values(users_db.execute("SELECT * FROM users WHERE name = 'user6'")) == [
+            [6, 'user6', 26]
+        ]
+
+    def test_index_survives_reopen(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)')
+            db.execute("INSERT INTO t VALUES (1, 'a')")
+            db.execute('CREATE INDEX idx_val ON t (val)')
+
+        with YesDB(temp_db_path) as db:
+            assert db.get_index_names() == ['idx_val']
+            assert _row_values(db.execute("SELECT * FROM t WHERE val = 'a'")) == [[1, 'a']]
+
+    def test_drop_index(self, users_db):
+        users_db.execute('CREATE INDEX idx_name ON users (name)')
+        users_db.execute('DROP INDEX idx_name')
+        assert users_db.get_index_names() == []
+
+    def test_drop_nonexistent_index_raises(self, users_db):
+        with pytest.raises(ValueError, match="does not exist"):
+            users_db.execute('DROP INDEX ghost_index')
+
+    def test_drop_table_cascades_index_drop(self, users_db):
+        users_db.execute('CREATE INDEX idx_name ON users (name)')
+        users_db.execute('DROP TABLE users')
+        assert users_db.get_index_names() == []
