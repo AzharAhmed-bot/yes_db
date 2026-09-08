@@ -48,7 +48,12 @@ class TokenType(Enum):
     AVG = auto()
     MIN = auto()
     MAX = auto()
-    
+    JOIN = auto()
+    ON = auto()
+    INNER = auto()
+    LEFT = auto()
+    OUTER = auto()
+
     # Literals
     INTEGER_LITERAL = auto()
     STRING_LITERAL = auto()
@@ -132,6 +137,11 @@ KEYWORDS = {
     'AVG': TokenType.AVG,
     'MIN': TokenType.MIN,
     'MAX': TokenType.MAX,
+    'JOIN': TokenType.JOIN,
+    'ON': TokenType.ON,
+    'INNER': TokenType.INNER,
+    'LEFT': TokenType.LEFT,
+    'OUTER': TokenType.OUTER,
 }
 
 

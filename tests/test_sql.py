@@ -7,7 +7,7 @@ from chidb.sql.lexer import Lexer, Token, TokenType, tokenize
 from chidb.sql.parser import (
     Parser, parse, ParseError,
     SelectStatement, InsertStatement, CreateTableStatement,
-    BinaryOp, Literal, Identifier, ColumnDef, AggregateCall
+    BinaryOp, Literal, Identifier, ColumnDef, AggregateCall, JoinClause
 )
 
 
@@ -407,6 +407,75 @@ class TestParserAggregates:
             AggregateCall(function='SUM', column='price'),
             AggregateCall(function='AVG', column='price'),
         ]
+
+
+class TestParserJoins:
+    """Test JOIN clause parsing."""
+
+    def test_parse_without_join_is_none(self):
+        ast = parse('SELECT * FROM orders')
+        assert ast.joins is None
+
+    def test_parse_default_join_is_inner(self):
+        ast = parse('SELECT * FROM orders JOIN users ON orders.user_id = users.id')
+        assert ast.joins == [
+            JoinClause(
+                table='users',
+                join_type='INNER',
+                on=BinaryOp(
+                    left=Identifier(name='orders.user_id'),
+                    operator='=',
+                    right=Identifier(name='users.id'),
+                ),
+            )
+        ]
+
+    def test_parse_explicit_inner_join(self):
+        ast = parse('SELECT * FROM orders INNER JOIN users ON orders.user_id = users.id')
+        assert ast.joins[0].join_type == 'INNER'
+
+    def test_parse_left_join(self):
+        ast = parse('SELECT * FROM users LEFT JOIN orders ON users.id = orders.user_id')
+        assert ast.joins[0].join_type == 'LEFT'
+        assert ast.joins[0].table == 'orders'
+
+    def test_parse_left_outer_join(self):
+        ast = parse('SELECT * FROM users LEFT OUTER JOIN orders ON users.id = orders.user_id')
+        assert ast.joins[0].join_type == 'LEFT'
+
+    def test_parse_multiple_joins(self):
+        ast = parse(
+            'SELECT * FROM a JOIN b ON a.id = b.a_id JOIN c ON b.id = c.b_id'
+        )
+        assert len(ast.joins) == 2
+        assert ast.joins[0].table == 'b'
+        assert ast.joins[1].table == 'c'
+
+    def test_parse_qualified_select_columns(self):
+        ast = parse('SELECT orders.total, users.name FROM orders JOIN users ON orders.user_id = users.id')
+        assert ast.columns == ['orders.total', 'users.name']
+
+    def test_parse_qualified_where_column(self):
+        ast = parse(
+            'SELECT * FROM orders JOIN users ON orders.user_id = users.id WHERE users.name = \'Alice\''
+        )
+        assert ast.where == BinaryOp(
+            left=Identifier(name='users.name'), operator='=', right=Literal(value='Alice')
+        )
+
+    def test_parse_join_with_where_and_order_by(self):
+        ast = parse(
+            'SELECT * FROM orders JOIN users ON orders.user_id = users.id '
+            'WHERE orders.total > 10 ORDER BY orders.total DESC'
+        )
+        assert ast.where is not None
+        assert ast.order_by == [('orders.total', 'DESC')]
+
+    def test_parse_qualified_aggregate_column(self):
+        ast = parse(
+            'SELECT SUM(orders.total) FROM orders JOIN users ON orders.user_id = users.id'
+        )
+        assert ast.columns == [AggregateCall(function='SUM', column='orders.total')]
 
 
 class TestParserInsert:

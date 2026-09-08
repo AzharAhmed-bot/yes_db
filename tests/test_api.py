@@ -428,3 +428,101 @@ class TestAggregates:
     def test_ungrouped_plain_column_raises(self, products_db):
         with pytest.raises(ValueError):
             products_db.execute('SELECT category, price FROM products GROUP BY category')
+
+
+class TestJoins:
+    """Test INNER and LEFT JOIN support."""
+
+    @pytest.fixture
+    def shop_db(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)')
+            db.execute('CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, total INTEGER)')
+            db.execute("INSERT INTO users VALUES (1, 'Alice')")
+            db.execute("INSERT INTO users VALUES (2, 'Bob')")
+            db.execute("INSERT INTO users VALUES (3, 'Carol')")
+            db.execute("INSERT INTO orders VALUES (1, 1, 10)")
+            db.execute("INSERT INTO orders VALUES (2, 1, 20)")
+            db.execute("INSERT INTO orders VALUES (3, 2, 5)")
+            yield db
+
+    def test_inner_join_basic(self, shop_db):
+        results = shop_db.execute(
+            'SELECT users.name, orders.total FROM orders JOIN users ON orders.user_id = users.id '
+            'ORDER BY orders.total DESC'
+        )
+        assert _row_values(results) == [['Alice', 20], ['Alice', 10], ['Bob', 5]]
+
+    def test_inner_join_excludes_unmatched(self, shop_db):
+        # Carol has no orders and must not appear in an INNER JOIN.
+        results = shop_db.execute(
+            'SELECT users.name FROM users JOIN orders ON users.id = orders.user_id'
+        )
+        names = {row[0] for row in _row_values(results)}
+        assert 'Carol' not in names
+
+    def test_left_join_includes_unmatched_with_nulls(self, shop_db):
+        results = shop_db.execute(
+            'SELECT users.name, orders.total FROM users LEFT JOIN orders ON users.id = orders.user_id '
+            'ORDER BY users.name'
+        )
+        assert _row_values(results) == [
+            ['Alice', 10], ['Alice', 20], ['Bob', 5], ['Carol', None],
+        ]
+
+    def test_join_with_where(self, shop_db):
+        results = shop_db.execute(
+            'SELECT users.name FROM orders JOIN users ON orders.user_id = users.id '
+            'WHERE orders.total > 8'
+        )
+        assert _row_values(results) == [['Alice'], ['Alice']]
+
+    def test_join_with_unqualified_unambiguous_column(self, shop_db):
+        results = shop_db.execute(
+            "SELECT name, total FROM orders JOIN users ON orders.user_id = users.id WHERE total > 8"
+        )
+        assert _row_values(results) == [['Alice', 10], ['Alice', 20]]
+
+    def test_join_ambiguous_column_raises(self, shop_db):
+        with pytest.raises(ValueError, match="Ambiguous"):
+            shop_db.execute('SELECT id FROM orders JOIN users ON orders.user_id = users.id')
+
+    def test_join_select_star(self, shop_db):
+        results = shop_db.execute(
+            'SELECT * FROM orders JOIN users ON orders.user_id = users.id WHERE orders.id = 1'
+        )
+        assert _row_values(results) == [[1, 1, 10, 1, 'Alice']]
+
+    def test_join_missing_table_raises(self, shop_db):
+        with pytest.raises(ValueError):
+            shop_db.execute('SELECT * FROM orders JOIN ghosts ON orders.id = ghosts.id')
+
+    def test_join_with_limit_and_offset(self, shop_db):
+        results = shop_db.execute(
+            'SELECT orders.total FROM orders JOIN users ON orders.user_id = users.id '
+            'ORDER BY orders.total ASC LIMIT 1 OFFSET 1'
+        )
+        assert _row_values(results) == [[10]]
+
+    def test_multi_way_join(self, shop_db):
+        db = shop_db
+        db.execute('CREATE TABLE items (id INTEGER PRIMARY KEY, order_id INTEGER, sku TEXT)')
+        db.execute("INSERT INTO items VALUES (1, 1, 'widget')")
+        db.execute("INSERT INTO items VALUES (2, 2, 'gadget')")
+
+        results = db.execute(
+            'SELECT users.name, orders.id, items.sku FROM orders '
+            'JOIN users ON orders.user_id = users.id '
+            'JOIN items ON items.order_id = orders.id '
+            'ORDER BY orders.id'
+        )
+        assert _row_values(results) == [
+            ['Alice', 1, 'widget'],
+            ['Alice', 2, 'gadget'],
+        ]
+
+    def test_join_with_aggregate_raises_clear_error(self, shop_db):
+        with pytest.raises(ValueError, match="JOIN"):
+            shop_db.execute(
+                'SELECT COUNT(*) FROM orders JOIN users ON orders.user_id = users.id GROUP BY users.name'
+            )

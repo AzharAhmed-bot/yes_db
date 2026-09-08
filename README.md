@@ -148,7 +148,7 @@ YesDB> SELECT * FROM users;
 
 - **SQL Support**: CREATE, SELECT, INSERT, UPDATE, DELETE, DROP, ALTER TABLE
 - **Data Types**: INTEGER, TEXT, REAL, BLOB
-- **Query Features**: WHERE, ORDER BY, LIMIT, OFFSET, DISTINCT
+- **Query Features**: WHERE, ORDER BY, LIMIT, OFFSET, DISTINCT, INNER/LEFT JOIN
 - **B-Tree Storage**: Efficient indexing and data retrieval
 - **No Dependencies**: Pure Python implementation (local mode)
 - **Cloud BaaS**: Host your database remotely with a single command
@@ -174,6 +174,12 @@ SELECT name, email FROM users WHERE name = 'Alice'
 -- Order and limit
 SELECT * FROM users ORDER BY age DESC
 SELECT * FROM users LIMIT 10 OFFSET 5
+
+-- Joins (INNER by default, or LEFT [OUTER])
+SELECT users.name, orders.total FROM orders
+  JOIN users ON orders.user_id = users.id
+SELECT users.name, orders.total FROM users
+  LEFT JOIN orders ON users.id = orders.user_id
 
 -- Update and delete
 UPDATE users SET age = 31 WHERE name = 'Alice'
@@ -262,9 +268,12 @@ MIT License - see [LICENSE](LICENSE) file
 
 ## Version
 
-Current version: **0.2.5** (Beta)
+Current version: **0.3.0** (Beta)
 
 ### Changelog
+
+#### v0.3.0
+- **New**: `JOIN` support — `INNER JOIN` (default) and `LEFT [OUTER] JOIN`, chainable across multiple tables, with `table.column` qualified references in `SELECT`, `ON`, `WHERE`, and `ORDER BY`. Unqualified column names resolve automatically when unambiguous across the joined tables, and raise a clear error when they're not. Not yet supported together with `GROUP BY`/aggregate functions.
 
 #### v0.2.5
 - **New**: A real first-run welcome — bare `yesdb` and `yesdb signup` now show a block-letter YESDB logo alongside the version/Beta tagline, plus a "New here? Get started" quickstart (signup → init → push, with a pointer to local mode) instead of just a bare help dump.

@@ -11,7 +11,7 @@ from chidb.btree import BTree
 from chidb.dbm import DatabaseMachine
 from chidb.record import Record
 from chidb.sql.lexer import Lexer
-from chidb.sql.parser import Parser, CreateTableStatement, UpdateStatement, DeleteStatement, DropTableStatement, AlterTableStatement, ColumnDef, SelectStatement, AggregateCall
+from chidb.sql.parser import Parser, CreateTableStatement, UpdateStatement, DeleteStatement, DropTableStatement, AlterTableStatement, ColumnDef, SelectStatement, AggregateCall, JoinClause, BinaryOp, Literal, Identifier
 from chidb.sql.optimizer import Optimizer
 from chidb.sql.codegen import CodeGenerator
 from chidb.log import get_logger
@@ -475,10 +475,13 @@ class YesDB:
     
     def _execute_select_advanced(self, stmt: SelectStatement) -> List[List[Any]]:
         """
-        Execute SELECT with ORDER BY, LIMIT, OFFSET, or DISTINCT.
+        Execute SELECT with ORDER BY, LIMIT, OFFSET, DISTINCT, or JOINs.
         """
         from chidb.record import Record
-        
+
+        if stmt.joins:
+            return self._execute_select_with_joins(stmt)
+
         table_name = stmt.table
         if table_name not in self.tables:
             raise QueryError(f"Table '{table_name}' does not exist")
@@ -548,8 +551,218 @@ class YesDB:
         # Apply LIMIT
         if stmt.limit:
             results = results[:stmt.limit]
-        
+
         return results
+
+    def _execute_select_with_joins(self, stmt: SelectStatement) -> List[List[Any]]:
+        """
+        Execute a SELECT with one or more JOINs, via nested-loop join.
+
+        Supports INNER and LEFT JOIN, qualified ('table.column') and
+        unqualified column references (unqualified names must be
+        unambiguous across the joined tables).
+        """
+        from chidb.record import Record
+
+        table_order = [stmt.table] + [join.table for join in stmt.joins]
+        table_metas: Dict[str, TableMetadata] = {}
+        table_rows: Dict[str, List['Record']] = {}
+
+        for table_name in table_order:
+            if table_name not in self.tables:
+                raise QueryError(f"Table '{table_name}' does not exist")
+            table_metas[table_name] = self.table_metadata.get(table_name)
+            btree = BTree(self.pager, self.tables[table_name])
+            table_rows[table_name] = [record for _, record in btree.scan()]
+
+        joined_rows: List[Dict[str, Optional['Record']]] = [
+            {stmt.table: record} for record in table_rows[stmt.table]
+        ]
+
+        for join in stmt.joins:
+            joined_rows = self._apply_join(join, joined_rows, table_rows[join.table], table_metas)
+
+        if stmt.where:
+            joined_rows = [
+                row for row in joined_rows
+                if self._evaluate_join_expression(stmt.where, row, table_metas)
+            ]
+
+        output_column_names = self._join_output_column_names(stmt.columns, table_order, table_metas)
+        results = [
+            [Record(self._project_join_row(stmt.columns, row, table_order, table_metas))]
+            for row in joined_rows
+        ]
+
+        if stmt.distinct:
+            seen = set()
+            unique_results = []
+            for row in results:
+                row_tuple = tuple(row[0].get_values())
+                if row_tuple not in seen:
+                    seen.add(row_tuple)
+                    unique_results.append(row)
+            results = unique_results
+
+        if stmt.order_by:
+            for col_name, direction in reversed(stmt.order_by):
+                index = self._find_join_output_index(col_name, output_column_names)
+                results.sort(
+                    key=lambda row: row[0].get_values()[index],
+                    reverse=(direction == 'DESC')
+                )
+
+        if stmt.offset:
+            results = results[stmt.offset:]
+        if stmt.limit:
+            results = results[:stmt.limit]
+
+        return results
+
+    def _apply_join(
+        self, join: JoinClause, left_rows: List[Dict[str, Optional['Record']]],
+        right_records: List['Record'], table_metas: Dict[str, TableMetadata]
+    ) -> List[Dict[str, Optional['Record']]]:
+        """Nested-loop join: match each left-side row against every candidate right-side record."""
+        joined_rows: List[Dict[str, Optional['Record']]] = []
+
+        for left_row in left_rows:
+            matched = False
+            for right_record in right_records:
+                candidate = dict(left_row)
+                candidate[join.table] = right_record
+                if self._evaluate_join_expression(join.on, candidate, table_metas):
+                    joined_rows.append(candidate)
+                    matched = True
+
+            if not matched and join.join_type == 'LEFT':
+                unmatched = dict(left_row)
+                unmatched[join.table] = None
+                joined_rows.append(unmatched)
+
+        return joined_rows
+
+    def _evaluate_join_expression(
+        self, expr: Any, joined_row: Dict[str, Optional['Record']], table_metas: Dict[str, TableMetadata]
+    ) -> bool:
+        """Evaluate a WHERE/ON expression (comparisons, AND, OR) against a joined row."""
+        if isinstance(expr, BinaryOp):
+            if expr.operator == 'AND':
+                return (
+                    self._evaluate_join_expression(expr.left, joined_row, table_metas)
+                    and self._evaluate_join_expression(expr.right, joined_row, table_metas)
+                )
+            if expr.operator == 'OR':
+                return (
+                    self._evaluate_join_expression(expr.left, joined_row, table_metas)
+                    or self._evaluate_join_expression(expr.right, joined_row, table_metas)
+                )
+
+            left_value = self._resolve_join_operand(expr.left, joined_row, table_metas)
+            right_value = self._resolve_join_operand(expr.right, joined_row, table_metas)
+            return self._compare(expr.operator, left_value, right_value)
+
+        raise QueryError(f"Unsupported expression in JOIN condition: {expr}")
+
+    def _resolve_join_operand(
+        self, node: Any, joined_row: Dict[str, Optional['Record']], table_metas: Dict[str, TableMetadata]
+    ) -> Any:
+        """Resolve one side of a comparison: a column reference or a literal value."""
+        if isinstance(node, Identifier):
+            return self._resolve_join_column(node.name, joined_row, table_metas)
+        if isinstance(node, Literal):
+            return node.value
+        raise QueryError(f"Unsupported operand in JOIN condition: {node}")
+
+    def _compare(self, operator: str, left: Any, right: Any) -> bool:
+        """Apply a comparison operator, treating any NULL operand as non-matching."""
+        if left is None or right is None:
+            return False
+        if operator == '=':
+            return left == right
+        if operator == '!=':
+            return left != right
+        if operator == '<':
+            return left < right
+        if operator == '>':
+            return left > right
+        if operator == '<=':
+            return left <= right
+        if operator == '>=':
+            return left >= right
+        raise QueryError(f"Unsupported operator: {operator}")
+
+    def _resolve_join_column(
+        self, name: str, joined_row: Dict[str, Optional['Record']], table_metas: Dict[str, TableMetadata]
+    ) -> Any:
+        """Resolve a (optionally 'table.column'-qualified) column reference against a joined row."""
+        if '.' in name:
+            table_name, column_name = name.split('.', 1)
+            if table_name not in joined_row:
+                raise QueryError(f"Unknown table qualifier '{table_name}' in '{name}'")
+            record = joined_row[table_name]
+            if record is None:
+                return None
+            index = self._column_index(column_name, table_metas.get(table_name))
+            return record.get_values()[index]
+
+        matches = [
+            table_name for table_name, meta in table_metas.items()
+            if meta and any(col.name == name for col in meta.columns)
+        ]
+        if not matches:
+            raise QueryError(f"Unknown column: {name}")
+        if len(matches) > 1:
+            raise QueryError(f"Ambiguous column '{name}' — qualify it, e.g. '{matches[0]}.{name}'")
+
+        table_name = matches[0]
+        record = joined_row[table_name]
+        if record is None:
+            return None
+        index = self._column_index(name, table_metas[table_name])
+        return record.get_values()[index]
+
+    def _join_output_column_names(
+        self, columns: List[str], table_order: List[str], table_metas: Dict[str, TableMetadata]
+    ) -> List[str]:
+        """Compute the qualified output column names, in projection order."""
+        if columns == ['*']:
+            return [
+                f"{table_name}.{col.name}"
+                for table_name in table_order
+                for col in table_metas[table_name].columns
+            ]
+        return list(columns)
+
+    def _project_join_row(
+        self, columns: List[str], joined_row: Dict[str, Optional['Record']],
+        table_order: List[str], table_metas: Dict[str, TableMetadata]
+    ) -> List[Any]:
+        """Build one flat output row from a joined row, per the SELECT column list."""
+        if columns == ['*']:
+            values = []
+            for table_name in table_order:
+                record = joined_row.get(table_name)
+                meta = table_metas[table_name]
+                if record is None:
+                    values.extend([None] * len(meta.columns))
+                else:
+                    values.extend(record.get_values())
+            return values
+
+        return [self._resolve_join_column(col, joined_row, table_metas) for col in columns]
+
+    def _find_join_output_index(self, name: str, output_column_names: List[str]) -> int:
+        """Find a column's position in the joined output, resolving unqualified names if unambiguous."""
+        if name in output_column_names:
+            return output_column_names.index(name)
+
+        candidates = [i for i, n in enumerate(output_column_names) if n.endswith(f".{name}")]
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            raise QueryError(f"Ambiguous column '{name}' — qualify it with a table name")
+        raise QueryError(f"Unknown column '{name}' in ORDER BY")
 
     def _is_aggregate_select(self, stmt: SelectStatement) -> bool:
         """Check whether a SELECT statement uses GROUP BY or an aggregate function."""
@@ -562,6 +775,9 @@ class YesDB:
         Execute SELECT with GROUP BY and/or aggregate functions
         (COUNT, SUM, AVG, MIN, MAX).
         """
+        if stmt.joins:
+            raise QueryError("JOIN is not yet supported together with GROUP BY/aggregate functions")
+
         table_name = stmt.table
         if table_name not in self.tables:
             raise QueryError(f"Table '{table_name}' does not exist")

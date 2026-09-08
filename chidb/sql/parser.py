@@ -18,6 +18,17 @@ class ASTNode:
 
 
 @dataclass
+class JoinClause(ASTNode):
+    """A single JOIN in a SELECT's FROM clause: [INNER|LEFT] JOIN table ON condition."""
+    table: str
+    join_type: str  # 'INNER' or 'LEFT'
+    on: 'Expression'
+
+    def __repr__(self) -> str:
+        return f"JoinClause({self.join_type} JOIN {self.table} ON {self.on})"
+
+
+@dataclass
 class SelectStatement(ASTNode):
     """SELECT statement AST node."""
     columns: List[Any]  # Column names ('*', str) or AggregateCall entries
@@ -28,9 +39,10 @@ class SelectStatement(ASTNode):
     limit: Optional[int] = None
     offset: Optional[int] = None
     distinct: bool = False
+    joins: Optional[List[JoinClause]] = None
 
     def __repr__(self) -> str:
-        return f"SelectStatement(columns={self.columns}, table={self.table}, where={self.where}, group_by={self.group_by}, order_by={self.order_by}, limit={self.limit})"
+        return f"SelectStatement(columns={self.columns}, table={self.table}, joins={self.joins}, where={self.where}, group_by={self.group_by}, order_by={self.order_by}, limit={self.limit})"
 
 
 @dataclass
@@ -275,6 +287,12 @@ class Parser:
         self.expect(TokenType.FROM)
         table = self.expect(TokenType.IDENTIFIER).value
 
+        # Optional JOIN clauses
+        joins = []
+        while self.match(TokenType.JOIN, TokenType.INNER, TokenType.LEFT):
+            joins.append(self.parse_join_clause())
+        joins = joins or None
+
         # Optional WHERE clause
         where = None
         if self.match(TokenType.WHERE):
@@ -287,10 +305,10 @@ class Parser:
             self.advance()
             self.expect(TokenType.BY)
 
-            group_by = [self.expect(TokenType.IDENTIFIER).value]
+            group_by = [self.parse_qualified_name()]
             while self.match(TokenType.COMMA):
                 self.advance()
-                group_by.append(self.expect(TokenType.IDENTIFIER).value)
+                group_by.append(self.parse_qualified_name())
 
         # Optional ORDER BY clause
         order_by = None
@@ -300,22 +318,22 @@ class Parser:
             
             order_by = []
             # Parse column name
-            col = self.expect(TokenType.IDENTIFIER).value
+            col = self.parse_qualified_name()
             direction = 'ASC'  # Default
-            
+
             if self.match(TokenType.ASC):
                 direction = 'ASC'
                 self.advance()
             elif self.match(TokenType.DESC):
                 direction = 'DESC'
                 self.advance()
-            
+
             order_by.append((col, direction))
-            
+
             # Multiple ORDER BY columns
             while self.match(TokenType.COMMA):
                 self.advance()
-                col = self.expect(TokenType.IDENTIFIER).value
+                col = self.parse_qualified_name()
                 direction = 'ASC'
                 
                 if self.match(TokenType.ASC):
@@ -347,14 +365,47 @@ class Parser:
             order_by=order_by,
             limit=limit,
             offset=offset,
-            distinct=distinct
+            distinct=distinct,
+            joins=joins
         )
 
+    def parse_join_clause(self) -> JoinClause:
+        """
+        Parse a single JOIN clause.
+
+        Grammar:
+        [INNER | LEFT [OUTER]] JOIN table ON expression
+        """
+        join_type = 'INNER'
+        if self.match(TokenType.INNER):
+            self.advance()
+        elif self.match(TokenType.LEFT):
+            join_type = 'LEFT'
+            self.advance()
+            if self.match(TokenType.OUTER):
+                self.advance()
+
+        self.expect(TokenType.JOIN)
+        table = self.expect(TokenType.IDENTIFIER).value
+        self.expect(TokenType.ON)
+        on = self.parse_expression()
+
+        return JoinClause(table=table, join_type=join_type, on=on)
+
+    def parse_qualified_name(self) -> str:
+        """Parse an identifier, optionally qualified as 'table.column'."""
+        name = self.expect(TokenType.IDENTIFIER).value
+        if self.match(TokenType.DOT):
+            self.advance()
+            column = self.expect(TokenType.IDENTIFIER).value
+            return f"{name}.{column}"
+        return name
+
     def parse_select_column(self) -> Any:
-        """Parse a single SELECT column: a plain identifier or an aggregate call."""
+        """Parse a single SELECT column: a plain (optionally qualified) identifier or an aggregate call."""
         if self.current_token and self.current_token.type in AGGREGATE_TOKENS:
             return self.parse_aggregate_call()
-        return self.expect(TokenType.IDENTIFIER).value
+        return self.parse_qualified_name()
 
     def parse_aggregate_call(self) -> AggregateCall:
         """
@@ -371,7 +422,7 @@ class Parser:
             column = '*'
             self.advance()
         else:
-            column = self.expect(TokenType.IDENTIFIER).value
+            column = self.parse_qualified_name()
         self.expect(TokenType.RPAREN)
 
         return AggregateCall(function=function, column=column)
@@ -617,8 +668,7 @@ class Parser:
     def parse_primary(self) -> Expression:
         """Parse primary expression (identifier or literal)."""
         if self.match(TokenType.IDENTIFIER):
-            name = self.current_token.value
-            self.advance()
+            name = self.parse_qualified_name()
             return Identifier(name=name)
         
         elif self.match(TokenType.INTEGER_LITERAL, TokenType.STRING_LITERAL, 
