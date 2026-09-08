@@ -151,6 +151,7 @@ YesDB> SELECT * FROM users;
 - **Query Features**: WHERE, ORDER BY, LIMIT, OFFSET, DISTINCT, INNER/LEFT JOIN
 - **B-Tree Storage**: Efficient indexing and data retrieval
 - **Secondary Indexes**: `CREATE INDEX` accelerates equality lookups on non-primary-key columns
+- **Transactions**: `BEGIN` / `COMMIT` / `ROLLBACK` for INSERT/UPDATE/DELETE
 - **No Dependencies**: Pure Python implementation (local mode)
 - **Cloud BaaS**: Host your database remotely with a single command
 - **Schema DSL**: Define tables in Python, push to cloud
@@ -195,6 +196,11 @@ DROP INDEX idx_users_email
 
 -- Drop table
 DROP TABLE users
+
+-- Transactions (INSERT/UPDATE/DELETE only — DDL isn't allowed mid-transaction)
+BEGIN
+INSERT INTO users VALUES (NULL, 'Dana', 'dana@example.com', 28)
+ROLLBACK  -- or COMMIT
 ```
 
 ## How Cloud Mode Works
@@ -273,9 +279,12 @@ MIT License - see [LICENSE](LICENSE) file
 
 ## Version
 
-Current version: **0.4.0** (Beta)
+Current version: **0.5.0** (Beta)
 
 ### Changelog
+
+#### v0.5.0
+- **New**: `BEGIN` / `COMMIT` / `ROLLBACK` transactions for INSERT/UPDATE/DELETE. Implemented as an in-memory snapshot-and-restore of the pager's page cache (where writes already live until `flush()`), so ROLLBACK is a pure in-memory operation — no partial writes ever reach disk. DDL (CREATE/DROP TABLE, ALTER TABLE, CREATE/DROP INDEX) is not allowed inside an active transaction, since it flushes to disk immediately and an in-memory rollback couldn't undo that. Closing a database with an active transaction rolls it back automatically.
 
 #### v0.4.0
 - **New**: `CREATE INDEX name ON table (column)` / `DROP INDEX name` — secondary indexes that accelerate `column = value` WHERE lookups from a full table scan down to a direct lookup. Implemented as an in-memory index (the hand-rolled B-tree only supports integer keys), automatically rebuilt when a database is reopened and kept in sync across INSERT/UPDATE/DELETE. `DROP TABLE` cascades to drop any indexes defined on it.

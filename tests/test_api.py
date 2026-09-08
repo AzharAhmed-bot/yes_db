@@ -621,3 +621,96 @@ class TestSecondaryIndexes:
         users_db.execute('CREATE INDEX idx_name ON users (name)')
         users_db.execute('DROP TABLE users')
         assert users_db.get_index_names() == []
+
+
+class TestTransactions:
+    """Test BEGIN / COMMIT / ROLLBACK."""
+
+    @pytest.fixture
+    def t_db(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)')
+            db.execute("INSERT INTO t VALUES (1, 'a')")
+            yield db
+
+    def test_rollback_discards_insert(self, t_db):
+        t_db.execute('BEGIN')
+        t_db.execute("INSERT INTO t VALUES (2, 'b')")
+        t_db.execute('ROLLBACK')
+        assert _row_values(t_db.execute('SELECT * FROM t')) == [[1, 'a']]
+
+    def test_commit_persists_insert(self, t_db):
+        t_db.execute('BEGIN')
+        t_db.execute("INSERT INTO t VALUES (2, 'b')")
+        t_db.execute('COMMIT')
+        assert _row_values(t_db.execute('SELECT * FROM t')) == [[1, 'a'], [2, 'b']]
+
+    def test_rollback_discards_update(self, t_db):
+        t_db.execute('BEGIN')
+        t_db.execute("UPDATE t SET val = 'zzz' WHERE id = 1")
+        t_db.execute('ROLLBACK')
+        assert _row_values(t_db.execute('SELECT * FROM t')) == [[1, 'a']]
+
+    def test_rollback_discards_delete(self, t_db):
+        t_db.execute('BEGIN')
+        t_db.execute('DELETE FROM t WHERE id = 1')
+        t_db.execute('ROLLBACK')
+        assert _row_values(t_db.execute('SELECT * FROM t')) == [[1, 'a']]
+
+    def test_reads_inside_transaction_see_uncommitted_writes(self, t_db):
+        t_db.execute('BEGIN')
+        t_db.execute("INSERT INTO t VALUES (2, 'b')")
+        assert _row_values(t_db.execute('SELECT * FROM t')) == [[1, 'a'], [2, 'b']]
+        t_db.execute('ROLLBACK')
+
+    def test_ddl_rejected_inside_transaction(self, t_db):
+        t_db.execute('BEGIN')
+        with pytest.raises(ValueError, match="DDL"):
+            t_db.execute('CREATE TABLE other (id INTEGER)')
+        t_db.execute('ROLLBACK')
+
+    def test_nested_begin_rejected(self, t_db):
+        t_db.execute('BEGIN')
+        with pytest.raises(ValueError, match="already in progress"):
+            t_db.execute('BEGIN')
+        t_db.execute('ROLLBACK')
+
+    def test_commit_without_begin_rejected(self, t_db):
+        with pytest.raises(ValueError, match="No transaction"):
+            t_db.execute('COMMIT')
+
+    def test_rollback_without_begin_rejected(self, t_db):
+        with pytest.raises(ValueError, match="No transaction"):
+            t_db.execute('ROLLBACK')
+
+    def test_committed_data_survives_reopen(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)')
+            db.execute('BEGIN')
+            db.execute("INSERT INTO t VALUES (1, 'a')")
+            db.execute('COMMIT')
+
+        with YesDB(temp_db_path) as db:
+            assert _row_values(db.execute('SELECT * FROM t')) == [[1, 'a']]
+
+    def test_rolled_back_data_absent_after_reopen(self, temp_db_path):
+        with YesDB(temp_db_path) as db:
+            db.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)')
+            db.execute("INSERT INTO t VALUES (1, 'a')")
+            db.execute('BEGIN')
+            db.execute("INSERT INTO t VALUES (2, 'b')")
+            db.execute('ROLLBACK')
+
+        with YesDB(temp_db_path) as db:
+            assert _row_values(db.execute('SELECT * FROM t')) == [[1, 'a']]
+
+    def test_close_with_active_transaction_rolls_back(self, temp_db_path):
+        db = YesDB(temp_db_path)
+        db.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)')
+        db.execute("INSERT INTO t VALUES (1, 'a')")
+        db.execute('BEGIN')
+        db.execute("INSERT INTO t VALUES (99, 'ghost')")
+        db.close()
+
+        with YesDB(temp_db_path) as db2:
+            assert _row_values(db2.execute('SELECT * FROM t')) == [[1, 'a']]

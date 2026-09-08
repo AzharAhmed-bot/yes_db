@@ -8,7 +8,7 @@ from chidb.sql.parser import (
     Parser, parse, ParseError,
     SelectStatement, InsertStatement, CreateTableStatement, DropTableStatement,
     BinaryOp, Literal, Identifier, ColumnDef, AggregateCall, JoinClause,
-    CreateIndexStatement, DropIndexStatement
+    CreateIndexStatement, DropIndexStatement, TransactionStatement
 )
 
 
@@ -530,6 +530,29 @@ class TestParserCreateTable:
         assert ast.columns[0].type == 'INTEGER'
         assert ast.columns[1].type == 'TEXT'
         assert ast.columns[2].type == 'REAL'
+
+
+class TestParserTransactions:
+    """Test BEGIN / COMMIT / ROLLBACK statement parsing."""
+
+    def test_parse_begin(self):
+        ast = parse('BEGIN')
+        assert isinstance(ast, TransactionStatement)
+        assert ast.action == 'BEGIN'
+
+    def test_parse_begin_transaction(self):
+        ast = parse('BEGIN TRANSACTION')
+        assert ast.action == 'BEGIN'
+
+    def test_parse_commit(self):
+        ast = parse('COMMIT')
+        assert isinstance(ast, TransactionStatement)
+        assert ast.action == 'COMMIT'
+
+    def test_parse_rollback(self):
+        ast = parse('ROLLBACK')
+        assert isinstance(ast, TransactionStatement)
+        assert ast.action == 'ROLLBACK'
 
 
 class TestParserCreateDropIndex:

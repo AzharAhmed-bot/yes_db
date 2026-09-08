@@ -54,6 +54,10 @@ class TokenType(Enum):
     LEFT = auto()
     OUTER = auto()
     INDEX = auto()
+    BEGIN = auto()
+    COMMIT = auto()
+    ROLLBACK = auto()
+    TRANSACTION = auto()
 
     # Literals
     INTEGER_LITERAL = auto()
@@ -144,6 +148,10 @@ KEYWORDS = {
     'LEFT': TokenType.LEFT,
     'OUTER': TokenType.OUTER,
     'INDEX': TokenType.INDEX,
+    'BEGIN': TokenType.BEGIN,
+    'COMMIT': TokenType.COMMIT,
+    'ROLLBACK': TokenType.ROLLBACK,
+    'TRANSACTION': TokenType.TRANSACTION,
 }
 
 

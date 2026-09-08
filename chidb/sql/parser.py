@@ -127,6 +127,15 @@ class DropIndexStatement(ASTNode):
 
 
 @dataclass
+class TransactionStatement(ASTNode):
+    """BEGIN / COMMIT / ROLLBACK statement AST node."""
+    action: str  # 'BEGIN', 'COMMIT', or 'ROLLBACK'
+
+    def __repr__(self) -> str:
+        return f"TransactionStatement(action={self.action})"
+
+
+@dataclass
 class ColumnDef:
     """Column definition in CREATE TABLE."""
     name: str
@@ -277,6 +286,12 @@ class Parser:
             return self.parse_drop_table()
         elif self.match(TokenType.ALTER):
             return self.parse_alter_table()
+        elif self.match(TokenType.BEGIN):
+            return self.parse_begin()
+        elif self.match(TokenType.COMMIT):
+            return self.parse_commit()
+        elif self.match(TokenType.ROLLBACK):
+            return self.parse_rollback()
         else:
             raise ParseError(f"Unexpected token: {self.current_token}")
     
@@ -539,6 +554,28 @@ class Parser:
         index_name = self.expect(TokenType.IDENTIFIER).value
 
         return DropIndexStatement(index_name=index_name)
+
+    def parse_begin(self) -> TransactionStatement:
+        """
+        Parse BEGIN statement.
+
+        Grammar:
+        BEGIN [TRANSACTION]
+        """
+        self.expect(TokenType.BEGIN)
+        if self.match(TokenType.TRANSACTION):
+            self.advance()
+        return TransactionStatement(action='BEGIN')
+
+    def parse_commit(self) -> TransactionStatement:
+        """Parse COMMIT statement."""
+        self.expect(TokenType.COMMIT)
+        return TransactionStatement(action='COMMIT')
+
+    def parse_rollback(self) -> TransactionStatement:
+        """Parse ROLLBACK statement."""
+        self.expect(TokenType.ROLLBACK)
+        return TransactionStatement(action='ROLLBACK')
 
     def parse_update(self) -> UpdateStatement:
         """

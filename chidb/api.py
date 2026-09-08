@@ -5,13 +5,14 @@ Provides high-level interface for applications to interact with the database.
 
 from typing import List, Any, Optional, Dict
 from dataclasses import dataclass
+import copy
 import json
 from chidb.pager import Pager
 from chidb.btree import BTree
 from chidb.dbm import DatabaseMachine
 from chidb.record import Record
 from chidb.sql.lexer import Lexer
-from chidb.sql.parser import Parser, CreateTableStatement, InsertStatement, UpdateStatement, DeleteStatement, DropTableStatement, AlterTableStatement, CreateIndexStatement, DropIndexStatement, ColumnDef, SelectStatement, AggregateCall, JoinClause, BinaryOp, Literal, Identifier
+from chidb.sql.parser import Parser, CreateTableStatement, InsertStatement, UpdateStatement, DeleteStatement, DropTableStatement, AlterTableStatement, CreateIndexStatement, DropIndexStatement, TransactionStatement, ColumnDef, SelectStatement, AggregateCall, JoinClause, BinaryOp, Literal, Identifier
 from chidb.sql.optimizer import Optimizer
 from chidb.sql.codegen import CodeGenerator
 from chidb.log import get_logger
@@ -144,6 +145,10 @@ class YesDB:
         self.indexes: Dict[str, IndexMetadata] = {}
         self._index_data: Dict[str, Dict[Any, List[int]]] = {}
 
+        # Transaction state (DML-only; see _reject_ddl_in_transaction)
+        self._txn_active: bool = False
+        self._txn_snapshot: Optional[dict] = None
+
         # Initialize system (load existing tables if any)
         self._initialize()
     
@@ -267,6 +272,10 @@ class YesDB:
                 return self._execute_create_index(ast)
             if isinstance(ast, DropIndexStatement):
                 return self._execute_drop_index(ast)
+
+            # Handle BEGIN / COMMIT / ROLLBACK
+            if isinstance(ast, TransactionStatement):
+                return self._execute_transaction_statement(ast)
             
             # Handle SELECT with GROUP BY or aggregate functions
             if isinstance(ast, SelectStatement) and self._is_aggregate_select(ast):
@@ -336,6 +345,7 @@ class YesDB:
 
         This creates a new B-tree for the table.
         """
+        self._reject_ddl_in_transaction()
         table_name = stmt.table
 
         # Security validations
@@ -961,6 +971,7 @@ class YesDB:
         """
         Execute DROP TABLE statement.
         """
+        self._reject_ddl_in_transaction()
         table_name = stmt.table
         
         if table_name not in self.tables:
@@ -985,6 +996,7 @@ class YesDB:
         """
         Execute ALTER TABLE statement.
         """
+        self._reject_ddl_in_transaction()
         table_name = stmt.table
         
         if table_name not in self.tables:
@@ -1010,6 +1022,7 @@ class YesDB:
         Builds an in-memory {value: [row_keys]} index over the table, used
         to accelerate equality WHERE lookups instead of a full table scan.
         """
+        self._reject_ddl_in_transaction()
         if stmt.index_name in self.indexes:
             raise QueryError(f"Index '{stmt.index_name}' already exists")
 
@@ -1030,6 +1043,7 @@ class YesDB:
 
     def _execute_drop_index(self, stmt: DropIndexStatement) -> List[List[Any]]:
         """Execute DROP INDEX statement."""
+        self._reject_ddl_in_transaction()
         if stmt.index_name not in self.indexes:
             raise QueryError(f"Index '{stmt.index_name}' does not exist")
 
@@ -1088,12 +1102,95 @@ class YesDB:
         """Get list of index names."""
         return list(self.indexes.keys())
 
+    def _reject_ddl_in_transaction(self) -> None:
+        """
+        DDL is disallowed inside a transaction.
+
+        DDL (CREATE/DROP TABLE, ALTER TABLE, CREATE/DROP INDEX) flushes to
+        disk immediately via the system catalog, which an in-memory
+        ROLLBACK could never undo — so it can't be allowed mid-transaction.
+        """
+        if self._txn_active:
+            raise QueryError(
+                "DDL statements are not allowed inside an active transaction — COMMIT or ROLLBACK first"
+            )
+
+    def _execute_transaction_statement(self, stmt: TransactionStatement) -> List[List[Any]]:
+        """Execute BEGIN / COMMIT / ROLLBACK."""
+        if stmt.action == 'BEGIN':
+            if self._txn_active:
+                raise QueryError("A transaction is already in progress")
+            self._begin_transaction()
+        elif stmt.action == 'COMMIT':
+            if not self._txn_active:
+                raise QueryError("No transaction is in progress")
+            self._commit_transaction()
+        elif stmt.action == 'ROLLBACK':
+            if not self._txn_active:
+                raise QueryError("No transaction is in progress")
+            self._rollback_transaction()
+        else:
+            raise QueryError(f"Unknown transaction action: {stmt.action}")
+
+        return []
+
+    def _begin_transaction(self) -> None:
+        """
+        Snapshot everything DML (INSERT/UPDATE/DELETE) can mutate, so a
+        later ROLLBACK can restore it: the pager's page cache (which is
+        where every write lives until flush()), per-table auto-increment
+        counters, and secondary index data.
+        """
+        self._txn_snapshot = {
+            'page_cache': {pid: bytearray(data) for pid, data in self.pager.page_cache.items()},
+            'dirty_pages': set(self.pager.dirty_pages),
+            'num_pages': self.pager.num_pages,
+            'next_auto_increment': {
+                name: meta.next_auto_increment for name, meta in self.table_metadata.items()
+            },
+            'index_data': copy.deepcopy(self._index_data),
+        }
+        self._txn_active = True
+        self.logger.info("Transaction started")
+
+    def _commit_transaction(self) -> None:
+        """Persist everything written since BEGIN and discard the snapshot."""
+        self.pager.flush()
+        self._txn_snapshot = None
+        self._txn_active = False
+        self.logger.info("Transaction committed")
+
+    def _rollback_transaction(self) -> None:
+        """Discard everything written since BEGIN by restoring the snapshot."""
+        snapshot = self._txn_snapshot
+
+        self.pager.page_cache = snapshot['page_cache']
+        self.pager.dirty_pages = snapshot['dirty_pages']
+        self.pager.num_pages = snapshot['num_pages']
+
+        for table_name, count in snapshot['next_auto_increment'].items():
+            if table_name in self.table_metadata:
+                self.table_metadata[table_name].next_auto_increment = count
+
+        self._index_data = snapshot['index_data']
+
+        # BTree instances cached here may reference pages that no longer
+        # exist post-rollback; drop them so they're recreated on next use.
+        self.dbm.btrees.clear()
+
+        self._txn_snapshot = None
+        self._txn_active = False
+        self.logger.info("Transaction rolled back")
 
     def close(self) -> None:
         """Close the database."""
+        if self._txn_active:
+            self.logger.warning("Closing database with an active transaction — rolling back")
+            self._rollback_transaction()
+
         # Save all table metadata before closing
         self._save_all_metadata()
-        
+
         self.pager.close()
         self.logger.info(f"Closed database '{self.filename}'")
     
