@@ -1,9 +1,8 @@
 """
-YesDB - A fully functional relational database built from scratch in Python.
+YesDB (Beta) - A relational database built from scratch in Python.
 
-An educational embedded database implementing B-tree storage, SQL parsing,
-and query optimization in pure Python. Also available as a cloud
-Backend-as-a-Service for students.
+An embedded database implementing B-tree storage, SQL parsing, and query
+optimization in pure Python. Also available as a cloud Backend-as-a-Service.
 """
 
 from chidb.api import YesDB, connect
@@ -11,7 +10,7 @@ from chidb.security import SecurityError, PathTraversalError, ResourceLimitError
 from chidb.client import CloudConnection, ExecuteResult
 from chidb.schema import Table, Column, Integer, Text, Real, Float, Blob
 
-__version__ = '0.2.3'
+__version__ = '0.2.4'
 __author__ = 'Azhar'
 __license__ = 'MIT'
 

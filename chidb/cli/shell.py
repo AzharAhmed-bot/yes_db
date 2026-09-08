@@ -59,8 +59,10 @@ class Shell:
     
     def print_welcome(self) -> None:
         """Print welcome message."""
-        print("yes_db - Educational Relational Database")
-        print("Enter SQL statements or .help for commands")
+        from chidb import __version__
+
+        print(f"YesDB v{__version__} (Beta) — connected to '{self.db.filename}'")
+        print("Type SQL statements, or .help for shell commands.")
         print()
     
     def execute_sql(self, sql: str) -> None:
@@ -246,8 +248,8 @@ def main(args: Optional[list] = None) -> int:
     """
     # Parse arguments
     parser = argparse.ArgumentParser(
-        description='yes_db - Educational Relational Database',
-        prog='yes_db'
+        description='YesDB (Beta) - a relational database built from scratch in Python',
+        prog='yesdb-local'
     )
     parser.add_argument(
         'database',

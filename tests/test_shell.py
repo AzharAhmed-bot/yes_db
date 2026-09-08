@@ -46,7 +46,8 @@ class TestShellBasics:
         with patch('sys.stdout', new=StringIO()) as fake_out:
             shell.print_welcome()
             output = fake_out.getvalue()
-            assert 'yes_db' in output
+            assert 'YesDB' in output
+            assert 'Beta' in output
         
         test_db.close()
     

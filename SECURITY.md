@@ -74,4 +74,4 @@ If you discover a security vulnerability:
 
 ---
 
-**Disclaimer**: YesDB is provided "as is" for educational purposes. For production systems with security requirements, use established databases like PostgreSQL, MySQL, or SQLite.
+**Disclaimer**: YesDB is provided "as is," currently in active beta. It has not undergone a professional security audit — for systems with strict security/compliance requirements, an established database (PostgreSQL, MySQL, SQLite) remains the safer choice for now.

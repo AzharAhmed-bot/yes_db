@@ -127,6 +127,11 @@ def cmd_signup(args) -> int:
     if not _require_requests():
         return 1
 
+    from chidb import __version__
+
+    print(f"YesDB v{__version__} (Beta) — a relational database built from scratch in Python.")
+    print("Let's create your cloud account.\n")
+
     email = input("Email: ").strip()
     if not email:
         print("Error: Email cannot be empty.", file=sys.stderr)
@@ -163,6 +168,7 @@ def cmd_signup(args) -> int:
         print(f"\n  Account created for {email}.")
         print(f"  API key: {api_key}")
         print(f"  Credentials saved to {CREDENTIALS_PATH}")
+        print(f"\n  Next: run 'yesdb init <project-name>' to create your first database.")
         return 0
 
     except requests.ConnectionError:
@@ -427,7 +433,9 @@ def cmd_shell(args) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    print(f"  Connected to '{db_name}' (cloud)")
+    from chidb import __version__
+
+    print(f"  YesDB v{__version__} (Beta) — connected to '{db_name}' (cloud)")
     print("  Enter SQL statements or 'exit' to quit.\n")
 
     try:
@@ -488,7 +496,7 @@ def main(args: Optional[list] = None) -> int:
     cloud subcommand is detected.
     """
     parser = argparse.ArgumentParser(
-        description="YesDB Cloud - Backend-as-a-Service for students",
+        description="YesDB Cloud (Beta) - Backend-as-a-Service",
         prog="yesdb",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")

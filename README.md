@@ -1,6 +1,6 @@
 # YesDB
 
-A lightweight relational database built from scratch in Python with SQL support, B-tree storage, and a cloud Backend-as-a-Service for students.
+**Beta** — A lightweight relational database built from scratch in Python, with SQL support, B-tree storage, and a cloud Backend-as-a-Service. Ready to use for real projects; still under active development, so expect the occasional rough edge.
 
 ## Installation
 
@@ -262,9 +262,15 @@ MIT License - see [LICENSE](LICENSE) file
 
 ## Version
 
-Current version: **0.2.3** (Beta)
+Current version: **0.2.4** (Beta)
 
 ### Changelog
+
+#### v0.2.4
+- **Changed**: Dropped "educational" framing everywhere (PyPI classifiers/keywords, package docstring, README, SECURITY.md) in favor of a clear Beta positioning — YesDB is usable for real projects now, not just a teaching toy.
+- **New**: Proper intro banners — `yesdb signup`, `yesdb-local <db>`, and `yesdb shell <db>` now show the product name, version, and Beta status on first touch. `signup` also points you to the next step (`yesdb init`).
+- **Fix**: The Cloud server's `/docs` page showed a hardcoded, never-updated `0.1.0` API version — now reads the real package version.
+- Removed a stale, unreferenced duplicate README (`readME.md`) left over from a very early pre-rename version of the project.
 
 #### v0.2.3
 - **Fix**: `SELECT ... WHERE ...` (without ORDER BY/LIMIT/DISTINCT/GROUP BY) silently returned wrong data — the WHERE clause never actually resolved column values, and column projection (`SELECT col FROM t`) returned full rows instead of the requested columns. Both now go through the same correct execution path as every other SELECT variant.
@@ -291,4 +297,4 @@ Current version: **0.2.3** (Beta)
 
 ---
 
-**Note**: YesDB is an educational database built from scratch to teach database internals. For production systems, consider SQLite, PostgreSQL, or MySQL.
+**Note**: YesDB is in active beta. It's built from scratch in Python and usable today for real projects and prototypes — you'll also see exactly how a database works internally along the way. Report issues on GitHub; for workloads with strict production/security requirements, an established database (PostgreSQL, MySQL, SQLite) is still the safer choice for now.

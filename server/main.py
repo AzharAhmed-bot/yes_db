@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from chidb import __version__
 from chidb.api import YesDB
 from chidb.record import Record
 from server.auth import (
@@ -41,7 +42,7 @@ async def lifespan(app: FastAPI):
 
 # ── FastAPI app ──────────────────────────────────────────────────
 
-app = FastAPI(title="YesDB Cloud", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="YesDB Cloud (Beta)", version=__version__, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
