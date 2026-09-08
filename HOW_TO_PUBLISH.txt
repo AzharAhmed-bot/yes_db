@@ -58,11 +58,12 @@ Test on Test PyPI before publishing to real PyPI:
 UPDATING YOUR PACKAGE
 ================================
 
-When releasing v0.1.1:
+When releasing a new version:
 
-1. Update version in:
-   - pyproject.toml: version = "0.1.1"
-   - chidb/__init__.py: __version__ = '0.1.1'
+1. Update the version in ONE place:
+   - chidb/__init__.py: __version__ = 'X.Y.Z'
+   (pyproject.toml reads it from here automatically via
+   [tool.setuptools.dynamic] — nothing else to touch.)
 
 2. Rebuild:
    rm -rf dist/ build/ *.egg-info/

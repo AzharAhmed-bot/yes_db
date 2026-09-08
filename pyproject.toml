@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yesdb"
-version = "0.2.2"
+dynamic = ["version"]
 description = "A lightweight, relational database built from scratch in Python"
 readme = "README.md"
 authors = [
@@ -52,6 +52,9 @@ Issues = "https://github.com/AzharAhmed-bot/yes_db/issues"
 [project.scripts]
 yesdb = "chidb.cli.cloud:main"
 yesdb-local = "chidb.cli.shell:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "chidb.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]
